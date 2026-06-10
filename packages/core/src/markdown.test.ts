@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scanMarkdown, rewriteSnippets, approveClaims, type Snippet, type Claim } from './markdown';
+import { scanMarkdown, rewriteSnippets, approveClaims, snippetFenceText, claimBlockText, type Snippet, type Claim } from './markdown';
 
 // Contract (format.md sections 3 and 4): snippets are code blocks
 // whose info string carries docref= (required); the sha rides the ref;
@@ -313,5 +313,38 @@ describe('approveClaims', () => {
 		const out = approveClaims(doc, [{ carrier: claims(doc)[0]!, shas: [SHA] }]);
 		expect(out).toContain(`src=src/a.go#Verify:${SHA}`);
 		expect(out).not.toContain('11111111');
+	});
+});
+
+describe('insertion text builders', () => {
+	// What the staging flow inserts at the cursor: a paste-ready snippet
+	// or claim with the sha already on the ref. Nobody hashes by hand.
+	it('builds a snippet fence that round-trips through the scanner', () => {
+		const text = snippetFenceText('src/a.ts#foo', 'aabbccdd', 'ts', 'const x = 1;');
+		const { references, errors } = scanMarkdown(text);
+		expect(errors).toEqual([]);
+		const f = references[0] as Snippet;
+		expect(f.ref).toBe('src/a.ts#foo');
+		expect(f.sha).toBe('aabbccdd');
+		expect(f.body).toBe('const x = 1;');
+	});
+
+	it('lengthens the fence when the body contains one', () => {
+		const text = snippetFenceText('src/ex.md#@demo', 'aabbccdd', 'md', '```js\nrun()\n```');
+		const { references, errors } = scanMarkdown(text);
+		expect(errors).toEqual([]);
+		expect((references[0] as Snippet).body).toBe('```js\nrun()\n```');
+	});
+
+	it('builds a claim block with one source per ref, shas riding along', () => {
+		const text = claimBlockText([
+			{ ref: 'src/a.ts#x', sha: 'aabbccdd' },
+			{ ref: 'src/b.ts#y', sha: '11223344' }
+		]);
+		const { references, errors } = scanMarkdown(text);
+		expect(errors).toEqual([]);
+		const c = references[0] as Claim;
+		expect(c.refs).toEqual(['src/a.ts#x', 'src/b.ts#y']);
+		expect(c.shas).toEqual(['aabbccdd', '11223344']);
 	});
 });

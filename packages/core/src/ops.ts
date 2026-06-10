@@ -15,6 +15,7 @@ import {
 	scanMarkdown,
 	rewriteSnippets,
 	approveClaims,
+	splitShaSuffix,
 	type Snippet,
 	type Claim,
 	type SnippetEdit
@@ -454,6 +455,94 @@ export async function diff(
 		}
 	}
 	return { entries };
+}
+
+/**
+ * Delete a reference everywhere: snippet fences vanish whole (their
+ * bodies are tool-owned), claim comments vanish while the prose stays
+ * (it belongs to the author), a multi-source claim merely drops the
+ * named source, and a same-repo region ref also removes its marker
+ * pair from the code.
+ */
+export async function remove(
+	project: Project,
+	refRaw: string
+): Promise<{ docsChanged: string[]; referencesRemoved: number; markersRemoved: number }> {
+	const target = splitShaSuffix(refRaw).ref;
+	let referencesRemoved = 0;
+	const docsChanged: string[] = [];
+
+	for (const doc of await docFiles(project)) {
+		const text = readFileSync(join(project.root, doc), 'utf8');
+		const { references } = scanMarkdown(text);
+		type Op =
+			| { kind: 'delete'; from: number; to: number }
+			| { kind: 'replace'; line: number; text: string };
+		const ops: Op[] = [];
+		for (const c of references) {
+			if (c.kind === 'snippet') {
+				if (c.ref === target) {
+					ops.push({ kind: 'delete', from: c.openLine, to: c.closeLine });
+					referencesRemoved++;
+				}
+				continue;
+			}
+			const at = c.refs.indexOf(target);
+			if (at === -1) continue;
+			referencesRemoved++;
+			if (c.refs.length === 1) {
+				// drop the comment pair, keep the prose between them
+				ops.push({ kind: 'delete', from: c.closeLine, to: c.closeLine });
+				ops.push({ kind: 'delete', from: c.openLine, to: c.openLine });
+			} else {
+				const value = c.refs
+					.map((r, k) => ({ r, sha: c.shas[k] }))
+					.filter((_, k) => k !== at)
+					.map((s) => (s.sha ? `${s.r}:${s.sha}` : s.r))
+					.join(',');
+				const tokens = c.tokens.map((t) => (t.startsWith('src=') ? `src=${value}` : t));
+				ops.push({
+					kind: 'replace',
+					line: c.openLine,
+					text: `${c.indent}<!-- docref: begin ${tokens.join(' ')} -->`
+				});
+			}
+		}
+		if (ops.length === 0) continue;
+		const lines = text.split('\n');
+		ops.sort(
+			(a, b) =>
+				(b.kind === 'delete' ? b.from : b.line) - (a.kind === 'delete' ? a.from : a.line)
+		);
+		for (const op of ops) {
+			if (op.kind === 'replace') lines[op.line - 1] = op.text;
+			else lines.splice(op.from - 1, op.to - op.from + 1);
+		}
+		writeFileSync(join(project.root, doc), lines.join('\n'));
+		docsChanged.push(doc);
+	}
+
+	let markersRemoved = 0;
+	const ref = parseRef(target);
+	if (!ref.alias && ref.fragment?.kind === 'region') {
+		try {
+			const abs = join(project.root, ref.path);
+			const text = readFileSync(abs, 'utf8');
+			const { regions, errors } = scanRegions(text);
+			const region = errors.length === 0 ? regions.get(ref.fragment.name) : undefined;
+			if (region) {
+				const lines = text.split('\n');
+				lines.splice(region.endLine - 1, 1);
+				lines.splice(region.beginLine - 1, 1);
+				writeFileSync(abs, lines.join('\n'));
+				markersRemoved = 1;
+			}
+		} catch {
+			// source file unreadable: nothing to remove there
+		}
+	}
+
+	return { docsChanged: docsChanged.sort(), referencesRemoved, markersRemoved };
 }
 
 export type AffectedEntry = {

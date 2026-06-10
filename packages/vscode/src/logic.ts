@@ -241,6 +241,7 @@ export function buildReferencesTree(index: RefIndex, report: Report | null): Sid
 				label: `${u.file}#@${u.name}`,
 				description: 'unused-anchor',
 				severity: 'warning',
+				ref: `${u.file}#@${u.name}`,
 				doc: u.file,
 				line: u.line
 			});
@@ -340,6 +341,7 @@ export function buildAnchorsTree(result: AnchorsResult): SidebarNode[] {
 				label: ref,
 				description: 'not used',
 				severity: 'warning',
+				ref,
 				doc: a.file,
 				line: a.line
 			});
@@ -404,4 +406,16 @@ export function statusText(report: Report | null): string {
 		return `docref $(warning) ${report.unusedAnchors.length} unused`;
 	}
 	return `docref $(check) ${s.upToDate}`;
+}
+
+/** The Staged view: refs collected for insertion into documents. */
+export function buildStageTree(staged: { ref: string; sha?: string }[]): SidebarNode[] {
+	return staged.map((s) => ({
+		type: 'ref',
+		id: `stage:${s.ref}`,
+		label: s.ref,
+		description: s.sha ?? 'does not resolve',
+		ref: s.ref,
+		state: 'unknown'
+	}));
 }

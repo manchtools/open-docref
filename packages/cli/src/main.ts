@@ -17,6 +17,7 @@ import {
 	ls,
 	anchors,
 	diff,
+	remove,
 	exitCode,
 	type Report,
 	type ReportEntry
@@ -33,6 +34,7 @@ commands:
   diff [paths...]             what changed since each stale claim was approved
   affected --since <rev>      references endangered by changes since <rev>
   ls                          the reverse index: refs and their locations
+  remove <ref>                delete a reference everywhere, marker included
   anchors                     region markers in the code, unused ones flagged
 
 options:
@@ -167,6 +169,16 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 					return [head, ...sides].join('\n');
 				});
 				return { code: 0, out: blocks.join('\n\n') || 'every claim is up to date' };
+			}
+			case 'remove': {
+				if (rest.length !== 1) return usage('remove takes exactly one ref');
+				const result = await remove(project(), rest[0]!);
+				if (json) return { code: 0, out: JSON.stringify(result, null, 2) };
+				const marker = result.markersRemoved ? ', marker pair deleted from the code' : '';
+				return {
+					code: 0,
+					out: `removed ${result.referencesRemoved} reference(s) in ${result.docsChanged.length} file(s)${marker}`
+				};
 			}
 			case 'anchors': {
 				const result = await anchors(project());

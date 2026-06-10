@@ -16,6 +16,11 @@ import {
 	ls,
 	anchors,
 	diff,
+	remove,
+	gitRevSource,
+	shortHash,
+	snippetFenceText,
+	claimBlockText,
 	listDeclarations,
 	languageForFile,
 	scanRegions,
@@ -34,6 +39,7 @@ import {
 	diagnosticsFromReport,
 	buildReferencesTree,
 	buildAnchorsTree,
+	buildStageTree,
 	isRelevantChange,
 	statusText,
 	type Leader,
@@ -84,6 +90,7 @@ class SidebarTree implements vscode.TreeDataProvider<SidebarNode> {
 		const item = new vscode.TreeItem(n.label, collapsible);
 		item.id = n.id;
 		item.description = n.description;
+		if (n.ref) item.contextValue = n.id.startsWith('stage:') ? 'staged' : 'hasRef';
 		switch (n.type) {
 			case 'group':
 				item.iconPath = new vscode.ThemeIcon(n.mood === 'attention' ? 'alert' : 'list-tree');
@@ -165,6 +172,62 @@ export function activate(context: vscode.ExtensionContext): void {
 	const tree = new SidebarTree(() => (index ? buildReferencesTree(index, report) : []));
 	const anchorTree = new SidebarTree(() => (anchorIndex ? buildAnchorsTree(anchorIndex) : []));
 
+	// the staging area: refs collected (sha computed at stage time for
+	// display, recomputed at insert time so pastes are always current)
+	let staged: { ref: string; sha?: string }[] = context.workspaceState.get('docref.staged') ?? [];
+	const stageTree = new SidebarTree(() => buildStageTree(staged));
+	async function saveStage(): Promise<void> {
+		await context.workspaceState.update('docref.staged', staged);
+		stageTree.refresh();
+	}
+
+	async function resolveRefNow(refRaw: string): Promise<{ content: string; sha: string } | null> {
+		const p = project();
+		if (!p) return null;
+		try {
+			const ref = parseRef(refRaw);
+			const source =
+				ref.alias !== undefined
+					? gitRevSource(p.repos[ref.alias]!.url, p.lock[ref.alias]!.rev)
+					: workingTreeSource(p.root);
+			const anchor = await resolveAnchor(source, ref);
+			return { content: anchor.content, sha: shortHash(anchor.content) };
+		} catch {
+			return null;
+		}
+	}
+
+	async function stageAdd(ref: string): Promise<void> {
+		const resolved = await resolveRefNow(ref);
+		staged = [
+			...staged.filter((s) => s.ref !== ref),
+			{ ref, ...(resolved ? { sha: resolved.sha } : {}) }
+		];
+		await saveStage();
+		void vscode.window.showInformationMessage(`docref: staged ${ref}`);
+	}
+
+	async function insertReference(n: SidebarNode, kind: 'claim' | 'snippet'): Promise<void> {
+		const editor = vscode.window.activeTextEditor;
+		if (!editor || !n.ref) {
+			void vscode.window.showWarningMessage('docref: open the target document and place the cursor first.');
+			return;
+		}
+		const resolved = await resolveRefNow(n.ref);
+		if (!resolved) {
+			void vscode.window.showWarningMessage(`docref: ${n.ref} does not resolve right now.`);
+			return;
+		}
+		const lang = n.ref.split('#')[0]!.split('/').pop()!.split('.').pop() ?? '';
+		const text =
+			kind === 'claim'
+				? claimBlockText([{ ref: n.ref, sha: resolved.sha }])
+				: snippetFenceText(n.ref, resolved.sha, lang, resolved.content);
+		const at = editor.selection.active;
+		await editor.edit((e) => e.insert(at, (at.character > 0 ? '\n' : '') + text));
+		rescanSoon();
+	}
+
 	let pending: NodeJS.Timeout | undefined;
 	async function rescan(): Promise<void> {
 		const p = project();
@@ -221,12 +284,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (isRelevantChange(rel, refPaths, anchorFiles)) rescanSoon();
 	}
 
-	async function createAnchor(): Promise<void> {
+	async function refFromSelection(): Promise<string | null> {
 		const editor = vscode.window.activeTextEditor;
 		const root = workspaceRoot();
 		if (!editor || !root || editor.selection.isEmpty) {
 			void vscode.window.showWarningMessage('docref: select the code to anchor first.');
-			return;
+			return null;
 		}
 		const doc = editor.document;
 		const rel = relPath(doc.uri, root).split('\\').join('/');
@@ -241,10 +304,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			try {
 				const decls = await listDeclarations(doc.getText(), rel);
 				const fragment = symbolFragmentForSelection(decls, startLine, endLine);
-				if (fragment) {
-					await offerRef(`${rel}#${fragment}`, doc.languageId);
-					return;
-				}
+				if (fragment) return `${rel}#${fragment}`;
 			} catch {
 				// fall through to region markers
 			}
@@ -255,7 +315,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const picked = await vscode.window.showQuickPick(['//', '#', '--', '<!-- -->', '/* */'], {
 				title: `docref: comment style for ${doc.languageId}`
 			});
-			if (!picked) return;
+			if (!picked) return null;
 			leader =
 				picked === '<!-- -->'
 					? { kind: 'block', open: '<!--', close: '-->' }
@@ -275,7 +335,7 @@ export function activate(context: vscode.ExtensionContext): void {
 						? `"${v}" already exists in this file`
 						: null
 		});
-		if (!name) return;
+		if (!name) return null;
 
 		const indent = /^[\t ]*/.exec(doc.lineAt(startLine - 1).text)![0];
 		const m = markerLines(name, leader, indent);
@@ -283,25 +343,42 @@ export function activate(context: vscode.ExtensionContext): void {
 			edit.insert(new vscode.Position(startLine - 1, 0), m.begin + '\n');
 			edit.insert(new vscode.Position(endLine, 0), m.end + '\n');
 		});
-		await offerRef(`${rel}#@${name}`, doc.languageId);
 		rescanSoon();
+		return `${rel}#@${name}`;
 	}
 
-	async function offerRef(ref: string, languageId: string): Promise<void> {
-		await vscode.env.clipboard.writeText(ref);
-		const lang = languageId === 'typescriptreact' ? 'tsx' : languageId;
+	/** Offer the freshly anchored ref: stage it, or copy paste-ready text. */
+	async function offerRef(ref: string): Promise<void> {
+		const resolved = await resolveRefNow(ref);
+		const pinned = resolved ? `${ref}:${resolved.sha}` : ref;
+		await vscode.env.clipboard.writeText(pinned);
 		const action = await vscode.window.showInformationMessage(
-			`docref: ${ref} copied`,
-			'Copy fence',
-			'Copy claim'
+			`docref: ${pinned} copied`,
+			'Stage',
+			'Copy claim',
+			'Copy snippet'
 		);
-		if (action === 'Copy fence') {
-			await vscode.env.clipboard.writeText('```' + lang + ` docref=${ref}\n` + '```');
+		if (action === 'Stage') {
+			await stageAdd(ref);
 		} else if (action === 'Copy claim') {
 			await vscode.env.clipboard.writeText(
-				`<!-- docref: begin src=${ref} -->\n\n<!-- docref: end -->`
+				claimBlockText([{ ref, ...(resolved ? { sha: resolved.sha } : {}) }])
+			);
+		} else if (action === 'Copy snippet') {
+			if (!resolved) {
+				void vscode.window.showWarningMessage('docref: cannot materialize, the ref does not resolve.');
+				return;
+			}
+			const lang = ref.split('#')[0]!.split('/').pop()!.split('.').pop() ?? '';
+			await vscode.env.clipboard.writeText(
+				snippetFenceText(ref, resolved.sha, lang, resolved.content)
 			);
 		}
+	}
+
+	async function createAnchor(): Promise<void> {
+		const ref = await refFromSelection();
+		if (ref) await offerRef(ref);
 	}
 
 	const lensProvider: vscode.CodeLensProvider = {
@@ -347,6 +424,47 @@ export function activate(context: vscode.ExtensionContext): void {
 		status,
 		vscode.window.registerTreeDataProvider('docrefRefs', tree),
 		vscode.window.registerTreeDataProvider('docrefAnchors', anchorTree),
+		vscode.window.registerTreeDataProvider('docrefStaged', stageTree),
+		vscode.commands.registerCommand('docref.stageSelection', async () => {
+			const ref = await refFromSelection();
+			if (ref) await stageAdd(ref);
+		}),
+		vscode.commands.registerCommand('docref.stageRef', async (n: SidebarNode) => {
+			if (n?.ref) await stageAdd(n.ref);
+		}),
+		vscode.commands.registerCommand('docref.unstage', async (n: SidebarNode) => {
+			staged = staged.filter((s) => s.ref !== n.ref);
+			await saveStage();
+		}),
+		vscode.commands.registerCommand('docref.clearStage', async () => {
+			staged = [];
+			await saveStage();
+		}),
+		vscode.commands.registerCommand('docref.insertClaim', (n: SidebarNode) =>
+			insertReference(n, 'claim')
+		),
+		vscode.commands.registerCommand('docref.insertSnippet', (n: SidebarNode) =>
+			insertReference(n, 'snippet')
+		),
+		vscode.commands.registerCommand('docref.removeEverywhere', async (n: SidebarNode) => {
+			const p = project();
+			if (!p || !n?.ref) return;
+			const marker = n.ref.includes('#@') ? ' Its marker pair is deleted from the code.' : '';
+			const confirmed = await vscode.window.showWarningMessage(
+				`Delete ${n.ref} everywhere? Snippets are removed whole; claim comments are removed and the prose stays.${marker}`,
+				{ modal: true },
+				'Delete'
+			);
+			if (confirmed !== 'Delete') return;
+			const result = await remove(p, n.ref);
+			staged = staged.filter((s) => s.ref !== n.ref);
+			await saveStage();
+			void vscode.window.showInformationMessage(
+				`docref: removed ${result.referencesRemoved} reference(s) in ${result.docsChanged.length} file(s)` +
+					(result.markersRemoved ? ', marker deleted' : '')
+			);
+			await rescan();
+		}),
 		vscode.languages.registerCodeLensProvider({ scheme: 'file' }, lensProvider),
 		vscode.commands.registerCommand('docref.createAnchor', createAnchor),
 		vscode.commands.registerCommand('docref.rescan', () => rescan()),

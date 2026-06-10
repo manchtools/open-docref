@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { loadProject } from './config';
-import { check, refresh, approve, update, affected, ls, anchors, diff, exitCode } from './ops';
+import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode } from './ops';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
 
 // Integration contract for the operations (tooling.md section 1 against the
@@ -408,6 +408,73 @@ describe('multi-source claims', () => {
 		);
 		const result = await anchors(loadProject(root));
 		expect(result.anchors.find((x) => x.name === 'extra')?.references).toHaveLength(1);
+	});
+});
+
+describe('remove: delete a reference everywhere', () => {
+	function tracedProject(): string {
+		const root = tmp();
+		write(
+			root,
+			'src/lib.ts',
+			['export function greet(): string {', '\t// docref: begin core-bit', '\tconst x = 1;', '\t// docref: end core-bit', '\treturn "hi";', '}', ''].join('\n')
+		);
+		write(
+			root,
+			'docs/a.md',
+			['# A', '', '```ts docref=src/lib.ts#@core-bit', 'const x = 1;', '```', '', '<!-- docref: begin src=src/lib.ts#@core-bit:aabbccdd -->', 'The prose stays.', '<!-- docref: end -->', ''].join('\n')
+		);
+		return root;
+	}
+
+	it('removes the snippet, the claim comments (prose kept), and the marker', async () => {
+		const root = tracedProject();
+		const result = await remove(loadProject(root), 'src/lib.ts#@core-bit');
+		expect(result.referencesRemoved).toBe(2);
+		expect(result.markersRemoved).toBe(1);
+		expect(result.docsChanged).toEqual(['docs/a.md']);
+
+		const doc = read(root, 'docs/a.md');
+		expect(doc).not.toContain('docref');
+		expect(doc).not.toContain('const x = 1;'); // the fence was tool-owned
+		expect(doc).toContain('The prose stays.');
+		expect(read(root, 'src/lib.ts')).not.toContain('docref');
+		// nothing left: no carriers, no anchors, gate clean
+		const report = await check(loadProject(root));
+		expect(report.entries).toEqual([]);
+		expect(report.unusedAnchors).toEqual([]);
+	});
+
+	it('drops only the named source from a multi-source claim', async () => {
+		const root = tmp();
+		write(root, 'src/a.ts', 'export function alpha(): number {\n\treturn 1;\n}\n');
+		write(root, 'src/b.ts', 'export function beta(): number {\n\treturn 2;\n}\n');
+		write(
+			root,
+			'docs/pair.md',
+			['<!-- docref: begin src=src/a.ts#alpha:11111111,src/b.ts#beta:22222222 -->', 'p', '<!-- docref: end -->', ''].join('\n')
+		);
+		const result = await remove(loadProject(root), 'src/a.ts#alpha');
+		expect(result.referencesRemoved).toBe(1);
+		const doc = read(root, 'docs/pair.md');
+		expect(doc).toContain('src=src/b.ts#beta:22222222');
+		expect(doc).not.toContain('alpha');
+		expect(doc).toContain('<!-- docref: end -->');
+	});
+
+	it('accepts a ref with a sha suffix and treats it as the bare ref', async () => {
+		const root = tracedProject();
+		const result = await remove(loadProject(root), 'src/lib.ts#@core-bit:aabbccdd');
+		expect(result.referencesRemoved).toBe(2);
+	});
+
+	it('does nothing for a ref referenced nowhere', async () => {
+		const root = tracedProject();
+		const before = read(root, 'docs/a.md');
+		const result = await remove(loadProject(root), 'src/lib.ts#greet');
+		expect(result.referencesRemoved).toBe(0);
+		expect(result.markersRemoved).toBe(0);
+		expect(read(root, 'docs/a.md')).toBe(before);
 	});
 });
 

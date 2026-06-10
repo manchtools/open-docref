@@ -10,6 +10,7 @@ import {
 	diagnosticsFromReport,
 	buildReferencesTree,
 	buildAnchorsTree,
+	buildStageTree,
 	type SidebarNode,
 	isRelevantChange,
 	statusText
@@ -280,6 +281,18 @@ describe('buildAnchorsTree', () => {
 	it('hides the used group when no anchor is used', () => {
 		const tree = buildAnchorsTree({ anchors: [result.anchors[1]!], errors: [] });
 		expect(tree.every((n) => n.type === 'issue')).toBe(true);
+	});
+});
+
+describe('buildStageTree', () => {
+	it('lists staged refs with their shas, ready to insert', () => {
+		const tree = buildStageTree([
+			{ ref: 'src/a.ts#x', sha: 'aabbccdd' },
+			{ ref: 'src/gone.ts#y' }
+		]);
+		expect(tree[0]).toMatchObject({ type: 'ref', label: 'src/a.ts#x', description: 'aabbccdd' });
+		expect(tree[1]!.description).toBe('does not resolve');
+		expect(buildStageTree([])).toEqual([]);
 	});
 });
 

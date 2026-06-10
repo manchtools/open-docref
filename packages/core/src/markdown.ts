@@ -247,17 +247,21 @@ export type SnippetEdit = { carrier: Snippet; body: string; sha: string };
  * fence is lengthened when the body itself contains fence-like runs, so the
  * result always round-trips through scanMarkdown.
  */
+function fenceLengthFor(body: string, fenceChar: string, atLeast = 3): number {
+	let maxRun = 0;
+	for (const l of body.split('\n')) {
+		const run = new RegExp(`^\\s*(${fenceChar === '`' ? '`' : '~'}{3,})`).exec(l);
+		if (run) maxRun = Math.max(maxRun, run[1]!.length);
+	}
+	return Math.max(atLeast, maxRun + 1, 3);
+}
+
 export function rewriteSnippets(text: string, edits: SnippetEdit[]): string {
 	const lines = text.split('\n');
 	const sorted = [...edits].sort((a, b) => b.carrier.openLine - a.carrier.openLine);
 	for (const { carrier: c, body, sha } of sorted) {
 		const bodyLines = body === '' ? [] : body.split('\n');
-		let maxRun = 0;
-		for (const l of bodyLines) {
-			const run = new RegExp(`^\\s*(${c.fenceChar === '`' ? '`' : '~'}{3,})`).exec(l);
-			if (run) maxRun = Math.max(maxRun, run[1]!.length);
-		}
-		const len = Math.max(c.fenceLen, maxRun + 1, 3);
+		const len = fenceLengthFor(body, c.fenceChar, c.fenceLen);
 		const tokens = withRefValue(c.tokens, 'docref', `${c.ref}:${sha}`);
 		const openLine =
 			c.indent + c.fenceChar.repeat(len) + (c.language ? c.language + ' ' : '') + tokens.join(' ');
@@ -285,4 +289,20 @@ export function assertNoErrors(errors: ScanError[], doc: string): void {
 		const e = errors[0]!;
 		throw new DocrefError(e.code, `${doc}:${e.line} ${e.message}`);
 	}
+}
+
+/**
+ * Paste-ready snippet: materialized body, sha riding the ref, fence
+ * lengthened past any fence runs in the body. What the staging flow
+ * inserts at the cursor; nobody computes a hash by hand.
+ */
+export function snippetFenceText(ref: string, sha: string, language: string, body: string): string {
+	const run = '`'.repeat(fenceLengthFor(body, '`'));
+	return `${run}${language ? language + ' ' : ''}docref=${ref}:${sha}\n${body}\n${run}\n`;
+}
+
+/** Paste-ready claim block, one source per ref, shas riding along. */
+export function claimBlockText(sources: { ref: string; sha?: string }[]): string {
+	const value = sources.map((s) => (s.sha ? `${s.ref}:${s.sha}` : s.ref)).join(',');
+	return `<!-- docref: begin src=${value} -->\n\n<!-- docref: end -->\n`;
 }

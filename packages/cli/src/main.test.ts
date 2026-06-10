@@ -85,6 +85,19 @@ describe('docref CLI', () => {
 		expect(parsed.entries[0].approvedRev).toMatch(/^[0-9a-f]{40}$/);
 	});
 
+	it('remove deletes a reference everywhere', async () => {
+		const root = tmp();
+		write(root, 'src/lib.ts', '// docref: begin bit\nconst x = 1;\n// docref: end bit\n');
+		write(root, 'docs/d.md', '<!-- docref: begin src=src/lib.ts#@bit -->\nkept prose\n<!-- docref: end -->\n');
+		const res = await run(['remove', 'src/lib.ts#@bit'], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toContain('removed 1 reference(s)');
+		expect(res.out).toContain('marker pair deleted');
+		expect(read(root, 'docs/d.md')).toContain('kept prose');
+		expect(read(root, 'docs/d.md')).not.toContain('docref');
+		expect((await run(['check'], root)).code).toBe(0);
+	});
+
 	it('anchors lists region markers with a not-used flag', async () => {
 		const root = tmp();
 		write(root, 'src/lib.ts', '// docref: begin spare\nconst s = 1;\n// docref: end spare\n');

@@ -40,6 +40,38 @@
 			{
 				"command": "docref.showDrift",
 				"title": "Docref: Show Claim Drift"
+			},
+			{
+				"command": "docref.stageSelection",
+				"title": "Docref: Stage Reference from Selection"
+			},
+			{
+				"command": "docref.stageRef",
+				"title": "Stage Reference"
+			},
+			{
+				"command": "docref.unstage",
+				"title": "Unstage",
+				"icon": "$(close)"
+			},
+			{
+				"command": "docref.clearStage",
+				"title": "Docref: Clear Staged",
+				"icon": "$(clear-all)"
+			},
+			{
+				"command": "docref.insertClaim",
+				"title": "Insert Claim at Cursor",
+				"icon": "$(note)"
+			},
+			{
+				"command": "docref.insertSnippet",
+				"title": "Insert Snippet at Cursor",
+				"icon": "$(code)"
+			},
+			{
+				"command": "docref.removeEverywhere",
+				"title": "Delete Reference Everywhere"
 			}
 		],
 		"menus": {
@@ -58,6 +90,11 @@
 					"command": "docref.showDrift",
 					"when": "resourceExtname == .md",
 					"group": "docref"
+				},
+				{
+					"command": "docref.stageSelection",
+					"when": "editorHasSelection",
+					"group": "docref"
 				}
 			],
 			"view/title": [
@@ -75,6 +112,43 @@
 					"command": "docref.rescan",
 					"when": "view == docrefAnchors",
 					"group": "navigation"
+				},
+				{
+					"command": "docref.clearStage",
+					"when": "view == docrefStaged",
+					"group": "navigation"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "docref.stageRef",
+					"when": "viewItem == hasRef",
+					"group": "docref@1"
+				},
+				{
+					"command": "docref.removeEverywhere",
+					"when": "viewItem == hasRef",
+					"group": "docref@2"
+				},
+				{
+					"command": "docref.insertClaim",
+					"when": "view == docrefStaged && viewItem == staged",
+					"group": "inline@1"
+				},
+				{
+					"command": "docref.insertSnippet",
+					"when": "view == docrefStaged && viewItem == staged",
+					"group": "inline@2"
+				},
+				{
+					"command": "docref.unstage",
+					"when": "view == docrefStaged && viewItem == staged",
+					"group": "inline@3"
+				},
+				{
+					"command": "docref.removeEverywhere",
+					"when": "view == docrefStaged && viewItem == staged",
+					"group": "docref@1"
 				}
 			]
 		},
@@ -96,9 +170,19 @@
 				{
 					"id": "docrefAnchors",
 					"name": "Anchors in Code"
+				},
+				{
+					"id": "docrefStaged",
+					"name": "Staged"
 				}
 			]
-		}
+		},
+		"viewsWelcome": [
+			{
+				"view": "docrefStaged",
+				"contents": "Stage a reference to insert it into a document with its hash precomputed.\n[Stage Current Selection](command:docref.stageSelection)\nOr right-click any reference in the views above."
+			}
+		]
 	},
 	"dependencies": {
 		"@open-docref/core": "workspace:*"
