@@ -8,8 +8,9 @@ import {
 	normalizeSelectionLines,
 	symbolFragmentForSelection,
 	diagnosticsFromReport,
-	buildRefTree,
-	buildAnchorTree,
+	buildReferencesTree,
+	buildAnchorsTree,
+	type SidebarNode,
 	isRelevantChange,
 	statusText
 } from './logic';
@@ -182,70 +183,103 @@ describe('diagnosticsFromReport', () => {
 	});
 });
 
-describe('buildRefTree', () => {
+describe('buildReferencesTree', () => {
 	const index: RefIndex = {
 		refs: [
 			{ ref: 'src/gone.ts#x', locations: [{ doc: 'docs/b.md', line: 1, kind: 'snippet' }] },
+			{ ref: 'src/x.ts#f', locations: [{ doc: 'docs/a.md', line: 3, kind: 'snippet' }] },
 			{
-				ref: 'src/x.ts#f',
-				locations: [{ doc: 'docs/a.md', line: 3, kind: 'snippet' }]
-			}
+				ref: 'src/x.ts#@r',
+				locations: [{ doc: 'docs/a.md', line: 9, kind: 'claim' }]
+			},
+			{ ref: 'config/app.toml', locations: [{ doc: 'docs/a.md', line: 20, kind: 'claim' }] }
 		]
 	};
 
-	it('rolls each ref up to its worst location state', () => {
-		const tree = buildRefTree(index, REPORT);
-		expect(tree.find((n) => n.ref === 'src/x.ts#f')?.state).toBe('up-to-date');
-		expect(tree.find((n) => n.ref === 'src/gone.ts#x')?.state).toBe('broken');
+	it('puts every problem in one expanded attention group, worst first', () => {
+		const tree = buildReferencesTree(index, {
+			...REPORT,
+			unusedAnchors: [{ file: 'src/y.ts', name: 'spare', line: 7 }]
+		});
+		const attention = tree[0]!;
+		expect(attention.type).toBe('group');
+		expect(attention.label).toBe('Needs attention');
+		const kinds = attention.children!.map((n) => n.description);
+		// broken and scan errors (severity error) come before warnings
+		expect(attention.children![0]!.severity).toBe('error');
+		expect(kinds.join(' ')).toContain('stale-claim');
+		expect(attention.children!.some((n) => n.label === 'src/y.ts#@spare')).toBe(true);
+		// every item is clickable: it knows where to jump
+		for (const n of attention.children!) {
+			expect(n.doc).toBeTruthy();
+			expect(n.line).toBeGreaterThan(0);
+		}
 	});
 
-	it('marks states unknown without a report', () => {
-		expect(buildRefTree(index, null).every((n) => n.state === 'unknown')).toBe(true);
+	it('omits the attention group entirely when everything is clean', () => {
+		const clean: Report = {
+			entries: [
+				{ doc: 'docs/a.md', line: 3, kind: 'snippet', ref: 'src/x.ts#f', state: 'up-to-date' }
+			],
+			errors: [],
+			unusedAnchors: [],
+			summary: { upToDate: 1, staleSnippet: 0, staleClaim: 0, broken: 0 }
+		};
+		const tree = buildReferencesTree(index, clean);
+		expect(tree[0]!.label).toBe('All references');
+	});
+
+	it('groups the inventory by source file with fragments and counts', () => {
+		const tree = buildReferencesTree(index, null);
+		const all = tree[tree.length - 1]!;
+		expect(all.type).toBe('group');
+		expect(all.description).toContain('4');
+		const files = all.children!;
+		expect(files.every((f) => f.type === 'file')).toBe(true);
+		const x = files.find((f) => f.path === 'src/x.ts')!;
+		expect(x.children!.map((r) => r.label).sort()).toEqual(['#@r', '#f']);
+		const whole = files.find((f) => f.path === 'config/app.toml')!;
+		expect(whole.children![0]!.label).toBe('(whole file)');
+		// locations hang off the fragment nodes
+		expect(x.children![0]!.children![0]!.type).toBe('location');
+	});
+
+	it('marks a drifted ref on its fragment node in the inventory', () => {
+		const tree = buildReferencesTree(index, REPORT);
+		const all = tree[tree.length - 1]!;
+		const gone = all.children!.find((f) => f.path === 'src/gone.ts')!;
+		expect(gone.children![0]!.description).toContain('broken');
 	});
 });
 
-describe('buildAnchorTree', () => {
-	it('puts marker errors first, then unused anchors, then used ones', () => {
-		const nodes = buildAnchorTree({
-			anchors: [
-				{
-					file: 'src/a.ts',
-					name: 'used-one',
-					line: 3,
-					endLine: 7,
-					references: [
-						{ doc: 'docs/a.md', line: 4, kind: 'snippet' },
-						{ doc: 'docs/b.md', line: 9, kind: 'claim' }
-					]
-				},
-				{ file: 'src/b.ts', name: 'orphan', line: 1, endLine: 2, references: [] }
-			],
-			errors: [{ file: 'src/c.ts', line: 5, code: 'unmatched-begin', message: 'never closed' }]
-		});
-		expect(nodes.map((n) => n.kind)).toEqual(['error', 'anchor', 'anchor']);
-		expect(nodes[1]).toMatchObject({
-			label: 'src/b.ts#@orphan',
-			description: 'not used',
-			used: false
-		});
-		expect(nodes[2]).toMatchObject({ label: 'src/a.ts#@used-one', description: '2 references' });
-		expect(nodes[0]).toMatchObject({ label: 'src/c.ts:5', description: 'never closed' });
+describe('buildAnchorsTree', () => {
+	const result = {
+		anchors: [
+			{
+				file: 'src/a.ts',
+				name: 'used-one',
+				line: 3,
+				endLine: 7,
+				references: [{ doc: 'docs/a.md', line: 4, kind: 'snippet' as const }]
+			},
+			{ file: 'src/b.ts', name: 'orphan', line: 1, endLine: 2, references: [] }
+		],
+		errors: [{ file: 'src/c.ts', line: 5, code: 'unmatched-begin', message: 'never closed' }]
+	};
+
+	it('orders errors, then unused issues, then a collapsed used group', () => {
+		const tree = buildAnchorsTree(result);
+		expect(tree[0]).toMatchObject({ type: 'issue', severity: 'error', label: 'src/c.ts:5' });
+		expect(tree[1]).toMatchObject({ type: 'issue', label: 'src/b.ts#@orphan', description: 'not used' });
+		const used = tree[2]!;
+		expect(used).toMatchObject({ type: 'group', label: 'Used' });
+		expect(used.children![0]!.label).toBe('src/a.ts#@used-one');
+		expect(used.children![0]!.children![0]!.type).toBe('location');
 	});
 
-	it('singularizes a single reference', () => {
-		const nodes = buildAnchorTree({
-			anchors: [
-				{
-					file: 'src/a.ts',
-					name: 'r',
-					line: 1,
-					endLine: 2,
-					references: [{ doc: 'docs/a.md', line: 1, kind: 'snippet' }]
-				}
-			],
-			errors: []
-		});
-		expect(nodes[0]).toMatchObject({ description: '1 reference', used: true });
+	it('hides the used group when no anchor is used', () => {
+		const tree = buildAnchorsTree({ anchors: [result.anchors[1]!], errors: [] });
+		expect(tree.every((n) => n.type === 'issue')).toBe(true);
 	});
 });
 

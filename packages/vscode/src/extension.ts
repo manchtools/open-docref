@@ -32,13 +32,12 @@ import {
 	normalizeSelectionLines,
 	symbolFragmentForSelection,
 	diagnosticsFromReport,
-	buildRefTree,
-	buildAnchorTree,
+	buildReferencesTree,
+	buildAnchorsTree,
 	isRelevantChange,
 	statusText,
 	type Leader,
-	type RefNode,
-	type AnchorTreeNode
+	type SidebarNode
 } from './logic';
 
 let report: Report | null = null;
@@ -66,83 +65,51 @@ const STATE_ICONS: Record<string, vscode.ThemeIcon> = {
 	unknown: new vscode.ThemeIcon('question')
 };
 
-class RefTree implements vscode.TreeDataProvider<RefNode | RefNode['locations'][number]> {
+class SidebarTree implements vscode.TreeDataProvider<SidebarNode> {
 	private emitter = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this.emitter.event;
+
+	constructor(private roots: () => SidebarNode[]) {}
 
 	refresh(): void {
 		this.emitter.fire();
 	}
 
-	getTreeItem(el: RefNode | RefNode['locations'][number]): vscode.TreeItem {
-		if ('ref' in el) {
-			const item = new vscode.TreeItem(el.ref, vscode.TreeItemCollapsibleState.Expanded);
-			item.iconPath = STATE_ICONS[el.state];
-			item.description = el.state;
-			item.command = {
-				command: 'docref.openAnchor',
-				title: 'Open referenced code',
-				arguments: [el.ref]
-			};
-			return item;
+	getTreeItem(n: SidebarNode): vscode.TreeItem {
+		const collapsible = !n.children?.length
+			? vscode.TreeItemCollapsibleState.None
+			: n.type === 'group' && n.mood === 'attention'
+				? vscode.TreeItemCollapsibleState.Expanded
+				: vscode.TreeItemCollapsibleState.Collapsed;
+		const item = new vscode.TreeItem(n.label, collapsible);
+		item.id = n.id;
+		item.description = n.description;
+		switch (n.type) {
+			case 'group':
+				item.iconPath = new vscode.ThemeIcon(n.mood === 'attention' ? 'alert' : 'list-tree');
+				break;
+			case 'issue':
+				item.iconPath = new vscode.ThemeIcon(n.severity === 'error' ? 'error' : 'warning');
+				item.command = { command: 'docref.openLocation', title: 'Open', arguments: [n.doc, n.line] };
+				break;
+			case 'file':
+				item.iconPath = new vscode.ThemeIcon('file-code');
+				item.command = { command: 'docref.openLocation', title: 'Open', arguments: [n.path, 1] };
+				break;
+			case 'ref':
+				item.iconPath = STATE_ICONS[n.state ?? 'unknown'];
+				item.command = { command: 'docref.openAnchor', title: 'Open code', arguments: [n.ref] };
+				break;
+			case 'location':
+				item.iconPath = new vscode.ThemeIcon(n.kind === 'claim' ? 'note' : 'code');
+				item.command = { command: 'docref.openLocation', title: 'Open', arguments: [n.doc, n.line] };
+				break;
 		}
-		const item = new vscode.TreeItem(`${el.doc}:${el.line}`, vscode.TreeItemCollapsibleState.None);
-		item.iconPath = new vscode.ThemeIcon(el.kind === 'claim' ? 'note' : 'code');
-		item.description = `${el.kind}${el.state === 'unknown' ? '' : ` (${el.state})`}`;
-		item.command = {
-			command: 'docref.openLocation',
-			title: 'Open',
-			arguments: [el.doc, el.line]
-		};
 		return item;
 	}
 
-	getChildren(
-		el?: RefNode | RefNode['locations'][number]
-	): (RefNode | RefNode['locations'][number])[] {
-		if (!el) return index ? buildRefTree(index, report) : [];
-		return 'ref' in el ? el.locations : [];
-	}
-}
-
-class AnchorTree implements vscode.TreeDataProvider<AnchorTreeNode | { doc: string; line: number; kind: string }> {
-	private emitter = new vscode.EventEmitter<void>();
-	readonly onDidChangeTreeData = this.emitter.event;
-
-	refresh(): void {
-		this.emitter.fire();
-	}
-
-	getTreeItem(el: AnchorTreeNode | { doc: string; line: number; kind: string }): vscode.TreeItem {
-		// locations carry `doc`; tree nodes carry `file`
-		if ('doc' in el) {
-			const item = new vscode.TreeItem(`${el.doc}:${el.line}`, vscode.TreeItemCollapsibleState.None);
-			item.iconPath = new vscode.ThemeIcon(el.kind === 'claim' ? 'note' : 'code');
-			item.command = { command: 'docref.openLocation', title: 'Open', arguments: [el.doc, el.line] };
-			return item;
-		}
-		if (el.kind === 'error') {
-			const item = new vscode.TreeItem(el.label, vscode.TreeItemCollapsibleState.None);
-			item.iconPath = new vscode.ThemeIcon('error');
-			item.description = el.description;
-			item.command = { command: 'docref.openLocation', title: 'Open', arguments: [el.file, el.line] };
-			return item;
-		}
-		const item = new vscode.TreeItem(
-			el.label,
-			el.used ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
-		);
-		item.iconPath = new vscode.ThemeIcon(el.used ? 'link' : 'circle-slash');
-		item.description = el.description;
-		item.command = { command: 'docref.openLocation', title: 'Open', arguments: [el.file, el.line] };
-		return item;
-	}
-
-	getChildren(
-		el?: AnchorTreeNode | { doc: string; line: number; kind: string }
-	): (AnchorTreeNode | { doc: string; line: number; kind: string })[] {
-		if (!el) return anchorIndex ? buildAnchorTree(anchorIndex) : [];
-		return !('doc' in el) && el.kind === 'anchor' ? el.references : [];
+	getChildren(n?: SidebarNode): SidebarNode[] {
+		return n ? (n.children ?? []) : this.roots();
 	}
 }
 
@@ -195,8 +162,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	status.command = 'docrefRefs.focus';
 	status.text = 'docref';
 	status.show();
-	const tree = new RefTree();
-	const anchorTree = new AnchorTree();
+	const tree = new SidebarTree(() => (index ? buildReferencesTree(index, report) : []));
+	const anchorTree = new SidebarTree(() => (anchorIndex ? buildAnchorsTree(anchorIndex) : []));
 
 	let pending: NodeJS.Timeout | undefined;
 	async function rescan(): Promise<void> {

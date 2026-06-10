@@ -157,10 +157,25 @@ export function diagnosticsFromReport(report: Report): Map<string, DiagnosticDat
 	return byDoc;
 }
 
-export type RefNode = {
-	ref: string;
-	state: State | 'unknown';
-	locations: { doc: string; line: number; kind: string; state: State | 'unknown' }[];
+/**
+ * One node type for both sidebar views. `id` is stable across rescans
+ * so the tree keeps its collapse state; `doc`/`line`/`ref`/`path` tell
+ * the thin vscode layer where a click should jump.
+ */
+export type SidebarNode = {
+	type: 'group' | 'issue' | 'file' | 'ref' | 'location';
+	id: string;
+	label: string;
+	description?: string;
+	severity?: 'error' | 'warning';
+	state?: State | 'unknown';
+	mood?: 'attention' | 'ok';
+	doc?: string;
+	line?: number;
+	path?: string;
+	ref?: string;
+	kind?: string;
+	children?: SidebarNode[];
 };
 
 const SEVERITY: Record<State | 'unknown', number> = {
@@ -171,57 +186,186 @@ const SEVERITY: Record<State | 'unknown', number> = {
 	broken: 4
 };
 
-export function buildRefTree(index: RefIndex, report: Report | null): RefNode[] {
-	const stateAt = new Map<string, State>();
-	for (const e of report?.entries ?? []) stateAt.set(`${e.doc}:${e.line}`, e.state);
-	return index.refs.map((r) => {
-		const locations = r.locations.map((l) => ({
-			...l,
-			state: stateAt.get(`${l.doc}:${l.line}`) ?? ('unknown' as const)
-		}));
-		const state = locations.reduce<State | 'unknown'>(
-			(worst, l) => (SEVERITY[l.state] > SEVERITY[worst] ? l.state : worst),
-			report ? 'up-to-date' : 'unknown'
-		);
-		return { ref: r.ref, state: report ? state : 'unknown', locations };
-	});
+function locationNodes(
+	ref: string,
+	locations: { doc: string; line: number; kind: string }[]
+): SidebarNode[] {
+	return locations.map((l) => ({
+		type: 'location',
+		id: `loc:${ref}:${l.doc}:${l.line}`,
+		label: `${l.doc}:${l.line}`,
+		description: l.kind,
+		doc: l.doc,
+		line: l.line,
+		kind: l.kind
+	}));
 }
 
-export type AnchorTreeNode =
-	| {
-			kind: 'anchor';
-			label: string;
-			description: string;
-			file: string;
-			line: number;
-			used: boolean;
-			references: { doc: string; line: number; kind: string }[];
-	  }
-	| { kind: 'error'; label: string; description: string; file: string; line: number };
+/**
+ * The References view, triage-first: one expanded group with every
+ * problem (clickable, worst first), then the full inventory grouped
+ * by source file, collapsed.
+ */
+export function buildReferencesTree(index: RefIndex, report: Report | null): SidebarNode[] {
+	const out: SidebarNode[] = [];
 
-/** Errors first, then unused anchors (the actionable ones), then used. */
-export function buildAnchorTree(result: AnchorsResult): AnchorTreeNode[] {
-	const errors: AnchorTreeNode[] = result.errors.map((e) => ({
-		kind: 'error',
+	if (report) {
+		const issues: SidebarNode[] = [];
+		for (const e of report.errors) {
+			issues.push({
+				type: 'issue',
+				id: `err:${e.doc}:${e.line}`,
+				label: `${e.doc}:${e.line}`,
+				description: e.message,
+				severity: 'error',
+				doc: e.doc,
+				line: e.line
+			});
+		}
+		for (const e of report.entries) {
+			if (e.state === 'up-to-date') continue;
+			issues.push({
+				type: 'issue',
+				id: `entry:${e.doc}:${e.line}:${e.ref}`,
+				label: e.ref,
+				description: `${e.state}  ${e.doc}:${e.line}`,
+				severity: e.state === 'broken' ? 'error' : 'warning',
+				doc: e.doc,
+				line: e.line
+			});
+		}
+		for (const u of report.unusedAnchors) {
+			issues.push({
+				type: 'issue',
+				id: `unused:${u.file}:${u.name}`,
+				label: `${u.file}#@${u.name}`,
+				description: 'unused-anchor',
+				severity: 'warning',
+				doc: u.file,
+				line: u.line
+			});
+		}
+		issues.sort(
+			(a, b) =>
+				Number(a.severity !== 'error') - Number(b.severity !== 'error') ||
+				a.label.localeCompare(b.label)
+		);
+		if (issues.length > 0) {
+			out.push({
+				type: 'group',
+				id: 'attention',
+				label: 'Needs attention',
+				description: String(issues.length),
+				mood: 'attention',
+				children: issues
+			});
+		}
+	}
+
+	const stateAt = new Map<string, State>();
+	for (const e of report?.entries ?? []) stateAt.set(`${e.doc}:${e.line}`, e.state);
+
+	const byFile = new Map<string, SidebarNode[]>();
+	for (const r of index.refs) {
+		const hash = r.ref.indexOf('#');
+		const path = hash === -1 ? r.ref : r.ref.slice(0, hash);
+		const fragment = hash === -1 ? '' : r.ref.slice(hash + 1);
+		const worst = report
+			? r.locations.reduce<State | 'unknown'>(
+					(w, l) => {
+						const st = stateAt.get(`${l.doc}:${l.line}`) ?? 'unknown';
+						return SEVERITY[st] > SEVERITY[w] ? st : w;
+					},
+					'up-to-date'
+				)
+			: 'unknown';
+		const stateNote = worst !== 'up-to-date' && worst !== 'unknown' ? `  ${worst}` : '';
+		const node: SidebarNode = {
+			type: 'ref',
+			id: `ref:${r.ref}`,
+			label: fragment ? `#${fragment}` : '(whole file)',
+			description: `${r.locations.length} reference${r.locations.length === 1 ? '' : 's'}${stateNote}`,
+			ref: r.ref,
+			state: worst,
+			children: locationNodes(r.ref, r.locations)
+		};
+		const list = byFile.get(path) ?? [];
+		list.push(node);
+		byFile.set(path, list);
+	}
+
+	const fileNodes: SidebarNode[] = [...byFile.entries()]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([path, refs]) => ({
+			type: 'file',
+			id: `file:${path}`,
+			label: path.split('/').pop() ?? path,
+			description: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined,
+			path,
+			children: refs.sort((a, b) => a.label.localeCompare(b.label))
+		}));
+
+	out.push({
+		type: 'group',
+		id: 'all',
+		label: 'All references',
+		description: `${index.refs.length} across ${byFile.size} file${byFile.size === 1 ? '' : 's'}`,
+		mood: 'ok',
+		children: fileNodes
+	});
+	return out;
+}
+
+/**
+ * The Anchors view: marker errors and unused anchors as clickable
+ * issues, the healthy rest in one collapsed group.
+ */
+export function buildAnchorsTree(result: AnchorsResult): SidebarNode[] {
+	const out: SidebarNode[] = result.errors.map((e) => ({
+		type: 'issue' as const,
+		id: `aerr:${e.file}:${e.line}`,
 		label: `${e.file}:${e.line}`,
 		description: e.message,
-		file: e.file,
+		severity: 'error' as const,
+		doc: e.file,
 		line: e.line
 	}));
-	const anchorNodes: AnchorTreeNode[] = result.anchors.map((a) => ({
-		kind: 'anchor',
-		label: `${a.file}#@${a.name}`,
-		description:
-			a.references.length === 0
-				? 'not used'
-				: `${a.references.length} reference${a.references.length === 1 ? '' : 's'}`,
-		file: a.file,
-		line: a.line,
-		used: a.references.length > 0,
-		references: a.references
-	}));
-	anchorNodes.sort((a, b) => Number(a.kind === 'anchor' && a.used) - Number(b.kind === 'anchor' && b.used));
-	return [...errors, ...anchorNodes];
+	const used: SidebarNode[] = [];
+	for (const a of result.anchors) {
+		const ref = `${a.file}#@${a.name}`;
+		if (a.references.length === 0) {
+			out.push({
+				type: 'issue',
+				id: `aunused:${ref}`,
+				label: ref,
+				description: 'not used',
+				severity: 'warning',
+				doc: a.file,
+				line: a.line
+			});
+		} else {
+			used.push({
+				type: 'ref',
+				id: `aused:${ref}`,
+				label: ref,
+				description: `${a.references.length} reference${a.references.length === 1 ? '' : 's'}`,
+				ref,
+				state: 'up-to-date',
+				children: locationNodes(ref, a.references)
+			});
+		}
+	}
+	if (used.length > 0) {
+		out.push({
+			type: 'group',
+			id: 'used',
+			label: 'Used',
+			description: String(used.length),
+			mood: 'ok',
+			children: used
+		});
+	}
+	return out;
 }
 
 const NOISE = /(^|\/)(node_modules|\.git|\.svelte-kit|dist|build|out|coverage|target)(\/|$)/;
