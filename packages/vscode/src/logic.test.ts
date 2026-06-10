@@ -9,6 +9,7 @@ import {
 	symbolFragmentForSelection,
 	diagnosticsFromReport,
 	buildRefTree,
+	buildAnchorTree,
 	statusText
 } from './logic';
 
@@ -188,6 +189,51 @@ describe('buildRefTree', () => {
 
 	it('marks states unknown without a report', () => {
 		expect(buildRefTree(index, null).every((n) => n.state === 'unknown')).toBe(true);
+	});
+});
+
+describe('buildAnchorTree', () => {
+	it('puts marker errors first, then unused anchors, then used ones', () => {
+		const nodes = buildAnchorTree({
+			anchors: [
+				{
+					file: 'src/a.ts',
+					name: 'used-one',
+					line: 3,
+					endLine: 7,
+					references: [
+						{ doc: 'docs/a.md', line: 4, carrier: 'fence' },
+						{ doc: 'docs/b.md', line: 9, carrier: 'pin' }
+					]
+				},
+				{ file: 'src/b.ts', name: 'orphan', line: 1, endLine: 2, references: [] }
+			],
+			errors: [{ file: 'src/c.ts', line: 5, code: 'unmatched-begin', message: 'never closed' }]
+		});
+		expect(nodes.map((n) => n.kind)).toEqual(['error', 'anchor', 'anchor']);
+		expect(nodes[1]).toMatchObject({
+			label: 'src/b.ts#@orphan',
+			description: 'not used',
+			used: false
+		});
+		expect(nodes[2]).toMatchObject({ label: 'src/a.ts#@used-one', description: '2 references' });
+		expect(nodes[0]).toMatchObject({ label: 'src/c.ts:5', description: 'never closed' });
+	});
+
+	it('singularizes a single reference', () => {
+		const nodes = buildAnchorTree({
+			anchors: [
+				{
+					file: 'src/a.ts',
+					name: 'r',
+					line: 1,
+					endLine: 2,
+					references: [{ doc: 'docs/a.md', line: 1, carrier: 'fence' }]
+				}
+			],
+			errors: []
+		});
+		expect(nodes[0]).toMatchObject({ description: '1 reference', used: true });
 	});
 });
 

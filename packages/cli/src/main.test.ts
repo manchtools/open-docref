@@ -60,6 +60,24 @@ describe('docref CLI', () => {
 		expect(res.code).toBe(2);
 	});
 
+	it('anchors lists region markers with a not-used flag', async () => {
+		const root = tmp();
+		write(root, 'src/lib.ts', '// docref: begin spare\nconst s = 1;\n// docref: end spare\n');
+		const res = await run(['anchors'], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toContain('not used');
+		expect(res.out).toContain('src/lib.ts#@spare');
+
+		const json = await run(['anchors', '--json'], root);
+		expect(JSON.parse(json.out).anchors[0]).toMatchObject({ name: 'spare', references: [] });
+	});
+
+	it('anchors exits 2 on marker errors', async () => {
+		const root = tmp();
+		write(root, 'src/broken.ts', '// docref: begin lonely\n');
+		expect((await run(['anchors'], root)).code).toBe(2);
+	});
+
 	it('unknown commands print usage and exit 2', async () => {
 		const res = await run(['frobnicate'], project());
 		expect(res.code).toBe(2);

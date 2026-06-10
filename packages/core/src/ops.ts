@@ -3,7 +3,7 @@
 // out of stale-snippet on its own (refresh), and never moves anything out
 // of stale-claim (bless is explicit) or broken (author intervention).
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { glob } from 'tinyglobby';
 import type { Project } from './config';
@@ -21,6 +21,7 @@ import {
 } from './markdown';
 import { workingTreeSource, resolveAnchor, type Anchor, type FileSource } from './resolve';
 import { branchTip, gitRevSource } from './gitcache';
+import { scanRegions } from './regions';
 
 export type State = 'fresh' | 'stale-snippet' | 'stale-claim' | 'broken';
 
@@ -377,6 +378,113 @@ export async function affected(
 export type RefIndex = {
 	refs: { ref: string; locations: { doc: string; line: number; carrier: 'fence' | 'pin' }[] }[];
 };
+
+export type AnchorEntry = {
+	file: string;
+	name: string;
+	line: number; // begin marker, 1-based
+	endLine: number;
+	references: { doc: string; line: number; carrier: 'fence' | 'pin' }[];
+};
+
+export type AnchorsResult = {
+	anchors: AnchorEntry[];
+	errors: { file: string; line: number; code: string; message: string }[];
+};
+
+/** Blank out fenced-code lines so marker EXAMPLES in markdown are not anchors. */
+function withoutFences(text: string): string {
+	const lines = text.split('\n');
+	let fence: { char: string; len: number } | null = null;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		if (fence) {
+			const close = new RegExp(`^\\s*${fence.char === '`' ? '`' : '~'}{${fence.len},}\\s*$`);
+			if (close.test(line)) fence = null;
+			lines[i] = '';
+			continue;
+		}
+		const open = /^\s*(`{3,}|~{3,})/.exec(line);
+		if (open) {
+			fence = { char: open[1]![0]!, len: open[1]!.length };
+			lines[i] = '';
+		}
+	}
+	return lines.join('\n');
+}
+
+async function anchorFiles(project: Project): Promise<string[]> {
+	let files = await glob(project.anchors.include, {
+		cwd: project.root,
+		ignore: project.anchors.exclude
+	});
+	// in a git repo, respect gitignore: build outputs and generated trees
+	// carry marker COPIES that would otherwise show up as anchors
+	try {
+		const out = execFileSync(
+			'git',
+			['ls-files', '--cached', '--others', '--exclude-standard'],
+			{ cwd: project.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+		);
+		const visible = new Set(out.split('\n').filter(Boolean));
+		files = files.filter((f) => visible.has(f));
+	} catch {
+		// not a git repo: the glob result stands
+	}
+	return files.sort();
+}
+
+/**
+ * The code-side inventory (the reverse of ls): every declared region
+ * marker, with the carriers referencing it; an empty list means the
+ * anchor is not used. Marker errors surface even in files no carrier
+ * references, which check alone would never visit.
+ */
+export async function anchors(project: Project): Promise<AnchorsResult> {
+	const used = new Map<string, AnchorEntry['references']>();
+	for (const doc of await docFiles(project)) {
+		const text = readFileSync(join(project.root, doc), 'utf8');
+		for (const c of scanMarkdown(text).carriers) {
+			try {
+				const ref = parseRef(c.ref);
+				if (ref.alias || ref.fragment?.kind !== 'region') continue;
+				const key = `${ref.path}#@${ref.fragment.name}`;
+				const list = used.get(key) ?? [];
+				list.push({ doc, line: c.openLine, carrier: c.kind });
+				used.set(key, list);
+			} catch {
+				// malformed carriers are check's findings
+			}
+		}
+	}
+
+	const result: AnchorsResult = { anchors: [], errors: [] };
+	for (const file of await anchorFiles(project)) {
+		const abs = join(project.root, file);
+		let text: string;
+		try {
+			if (!statSync(abs).isFile() || statSync(abs).size > 2_000_000) continue;
+			text = readFileSync(abs, 'utf8');
+		} catch {
+			continue;
+		}
+		if (text.includes('\u0000') || !text.includes('docref:')) continue;
+		const scannable = /\.(md|mdx|markdown)$/i.test(file) ? withoutFences(text) : text;
+		const { regions, errors } = scanRegions(scannable);
+		result.errors.push(...errors.map((e) => ({ file, ...e })));
+		for (const [name, region] of regions) {
+			result.anchors.push({
+				file,
+				name,
+				line: region.beginLine,
+				endLine: region.endLine,
+				references: used.get(`${file}#@${name}`) ?? []
+			});
+		}
+	}
+	result.anchors.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+	return result;
+}
 
 /** The reverse index: every referenced anchor and where it is referenced. */
 export async function ls(project: Project): Promise<RefIndex> {

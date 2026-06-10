@@ -74,6 +74,10 @@
 				{
 					"id": "docrefRefs",
 					"name": "References"
+				},
+				{
+					"id": "docrefAnchors",
+					"name": "Anchors in Code"
 				}
 			]
 		}

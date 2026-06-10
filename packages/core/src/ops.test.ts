@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { loadProject } from './config';
-import { check, refresh, bless, update, affected, ls, exitCode } from './ops';
+import { check, refresh, bless, update, affected, ls, anchors, exitCode } from './ops';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
 
 // Integration contract for the operations (tooling.md section 1 against the
@@ -262,6 +262,66 @@ describe('affected: mapping changes to carriers', () => {
 		refs = result.entries.map((e) => e.ref).sort();
 		expect(refs).toEqual(['src/calc.ts', 'src/calc.ts#add', 'src/calc.ts#sub']);
 		expect(result.entries.find((e) => e.ref === 'src/calc.ts#sub')?.reason).toBe('broken');
+	});
+});
+
+describe('anchors: the code-side inventory', () => {
+	// The reverse view (tooling.md): every declared region marker in the
+	// codebase, each flagged with its references or as not used. Symbols
+	// are implicit anchors and deliberately not inventoried.
+
+	it('lists every region marker with its references, flagging unused ones', async () => {
+		const root = sameRepoProject(); // lib.ts declares pi-part; page.md references it
+		write(root, 'src/lib.ts', read(root, 'src/lib.ts') + '// docref: begin spare\nconst s = 1;\n// docref: end spare\n');
+		const result = await anchors(loadProject(root));
+		expect(result.errors).toEqual([]);
+		expect(result.anchors.map((a) => `${a.file}#@${a.name}`).sort()).toEqual([
+			'src/lib.ts#@pi-part',
+			'src/lib.ts#@spare'
+		]);
+		const pi = result.anchors.find((a) => a.name === 'pi-part')!;
+		expect(pi.references).toEqual([{ doc: 'docs/page.md', line: 6, carrier: 'fence' }]);
+		expect(result.anchors.find((a) => a.name === 'spare')!.references).toEqual([]);
+	});
+
+	it('surfaces marker errors even in files no carrier references', async () => {
+		const root = tmp();
+		write(root, 'src/broken.ts', '// docref: begin lonely\ncode\n');
+		const result = await anchors(loadProject(root));
+		expect(result.errors).toEqual([
+			{ file: 'src/broken.ts', line: 1, code: 'unmatched-begin', message: expect.stringContaining('lonely') }
+		]);
+	});
+
+	it('ignores marker examples inside markdown code fences', async () => {
+		const root = tmp();
+		write(
+			root,
+			'docs/spec.md',
+			['```', '// docref: begin example-only', '```', '<!-- docref: begin real-md-region -->', 'x', '<!-- docref: end real-md-region -->', ''].join('\n')
+		);
+		const result = await anchors(loadProject(root));
+		expect(result.errors).toEqual([]);
+		expect(result.anchors.map((a) => a.name)).toEqual(['real-md-region']);
+	});
+
+	it('respects gitignore when the project is a git repo', async () => {
+		const root = tmp();
+		initRepo(root);
+		write(root, '.gitignore', 'gen/\n');
+		write(root, 'gen/copy.ts', '// docref: begin generated\nx\n// docref: end generated\n');
+		write(root, 'src/s.ts', '// docref: begin real\nx\n// docref: end real\n');
+		const result = await anchors(loadProject(root));
+		expect(result.anchors.map((a) => a.name)).toEqual(['real']);
+	});
+
+	it('honors [anchors] exclude from docref.toml', async () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[anchors]\nexclude = ["vendor/**"]\n');
+		write(root, 'vendor/v.ts', '// docref: begin vendored\nx\n// docref: end vendored\n');
+		write(root, 'src/s.ts', '// docref: begin mine\nx\n// docref: end mine\n');
+		const result = await anchors(loadProject(root));
+		expect(result.anchors.map((a) => a.name)).toEqual(['mine']);
 	});
 });
 

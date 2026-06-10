@@ -11,12 +11,14 @@ import {
 	refresh,
 	bless,
 	ls,
+	anchors,
 	listDeclarations,
 	languageForFile,
 	scanRegions,
 	type Project,
 	type Report,
-	type RefIndex
+	type RefIndex,
+	type AnchorsResult
 } from '@open-docref/core';
 import {
 	commentLeaderFor,
@@ -27,13 +29,16 @@ import {
 	symbolFragmentForSelection,
 	diagnosticsFromReport,
 	buildRefTree,
+	buildAnchorTree,
 	statusText,
 	type Leader,
-	type RefNode
+	type RefNode,
+	type AnchorTreeNode
 } from './logic';
 
 let report: Report | null = null;
 let index: RefIndex | null = null;
+let anchorIndex: AnchorsResult | null = null;
 
 function workspaceRoot(): string | null {
 	return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
@@ -90,6 +95,46 @@ class RefTree implements vscode.TreeDataProvider<RefNode | RefNode['locations'][
 	}
 }
 
+class AnchorTree implements vscode.TreeDataProvider<AnchorTreeNode | { doc: string; line: number; carrier: string }> {
+	private emitter = new vscode.EventEmitter<void>();
+	readonly onDidChangeTreeData = this.emitter.event;
+
+	refresh(): void {
+		this.emitter.fire();
+	}
+
+	getTreeItem(el: AnchorTreeNode | { doc: string; line: number; carrier: string }): vscode.TreeItem {
+		if (!('kind' in el)) {
+			const item = new vscode.TreeItem(`${el.doc}:${el.line}`, vscode.TreeItemCollapsibleState.None);
+			item.iconPath = new vscode.ThemeIcon(el.carrier === 'pin' ? 'note' : 'code');
+			item.command = { command: 'docref.openLocation', title: 'Open', arguments: [el.doc, el.line] };
+			return item;
+		}
+		if (el.kind === 'error') {
+			const item = new vscode.TreeItem(el.label, vscode.TreeItemCollapsibleState.None);
+			item.iconPath = new vscode.ThemeIcon('error');
+			item.description = el.description;
+			item.command = { command: 'docref.openLocation', title: 'Open', arguments: [el.file, el.line] };
+			return item;
+		}
+		const item = new vscode.TreeItem(
+			el.label,
+			el.used ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+		);
+		item.iconPath = new vscode.ThemeIcon(el.used ? 'link' : 'circle-slash');
+		item.description = el.description;
+		item.command = { command: 'docref.openLocation', title: 'Open', arguments: [el.file, el.line] };
+		return item;
+	}
+
+	getChildren(
+		el?: AnchorTreeNode | { doc: string; line: number; carrier: string }
+	): (AnchorTreeNode | { doc: string; line: number; carrier: string })[] {
+		if (!el) return anchorIndex ? buildAnchorTree(anchorIndex) : [];
+		return el && 'kind' in el && el.kind === 'anchor' ? el.references : [];
+	}
+}
+
 export function activate(context: vscode.ExtensionContext): void {
 	// inside the bundle nothing can resolve through node_modules; the
 	// build copies the wasm files into dist/wasm and we point core there
@@ -104,6 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	status.text = 'docref';
 	status.show();
 	const tree = new RefTree();
+	const anchorTree = new AnchorTree();
 
 	let pending: NodeJS.Timeout | undefined;
 	async function rescan(): Promise<void> {
@@ -112,6 +158,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		try {
 			report = await check(p);
 			index = await ls(p);
+			anchorIndex = await anchors(p);
 		} catch (e) {
 			void vscode.window.showErrorMessage(`docref: ${(e as Error).message}`);
 			return;
@@ -136,6 +183,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		status.text = statusText(report);
 		tree.refresh();
+		anchorTree.refresh();
 	}
 	function rescanSoon(): void {
 		clearTimeout(pending);
@@ -267,6 +315,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		diagnostics,
 		status,
 		vscode.window.registerTreeDataProvider('docrefRefs', tree),
+		vscode.window.registerTreeDataProvider('docrefAnchors', anchorTree),
 		vscode.languages.registerCodeLensProvider({ scheme: 'file' }, lensProvider),
 		vscode.commands.registerCommand('docref.createAnchor', createAnchor),
 		vscode.commands.registerCommand('docref.rescan', () => rescan()),

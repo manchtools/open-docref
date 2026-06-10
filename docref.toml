@@ -1,0 +1,3 @@
+[anchors]
+# test files build marker strings as fixtures; they are not real anchors
+exclude = ["**/*.test.ts"]

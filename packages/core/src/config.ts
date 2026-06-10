@@ -11,6 +11,8 @@ export type RepoConfig = { url: string; ref?: string };
 export type Project = {
 	root: string;
 	scan: { include: string[]; exclude: string[] };
+	/** where to look for region markers (the code-side inventory) */
+	anchors: { include: string[]; exclude: string[] };
 	repos: Record<string, RepoConfig>;
 	lock: Record<string, { rev: string }>;
 };
@@ -26,6 +28,7 @@ export function loadProject(root: string): Project {
 	const project: Project = {
 		root,
 		scan: { include: DEFAULT_INCLUDE, exclude: [...ALWAYS_EXCLUDE] },
+		anchors: { include: ['**/*'], exclude: [...ALWAYS_EXCLUDE] },
 		repos: {},
 		lock: {}
 	};
@@ -36,6 +39,9 @@ export function loadProject(root: string): Project {
 		const scan = t.scan as { include?: string[]; exclude?: string[] } | undefined;
 		if (scan?.include?.length) project.scan.include = scan.include;
 		if (scan?.exclude?.length) project.scan.exclude.push(...scan.exclude);
+		const anchors = t.anchors as { include?: string[]; exclude?: string[] } | undefined;
+		if (anchors?.include?.length) project.anchors.include = anchors.include;
+		if (anchors?.exclude?.length) project.anchors.exclude.push(...anchors.exclude);
 		const repos = (t.repos ?? {}) as Record<string, { url?: string; ref?: string }>;
 		for (const [alias, repo] of Object.entries(repos)) {
 			if (!repo.url) {

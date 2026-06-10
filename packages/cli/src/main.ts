@@ -12,6 +12,7 @@ import {
 	update,
 	affected,
 	ls,
+	anchors,
 	exitCode,
 	type Report,
 	type ReportEntry
@@ -27,6 +28,7 @@ commands:
          --check              dry run: report drift, write nothing
   affected --since <rev>      carriers endangered by changes since <rev>
   ls                          the reverse index: refs and their locations
+  anchors                     region markers in the code, unused ones flagged
 
 options:
   --json                      machine-readable output`;
@@ -120,6 +122,22 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 						result.entries.map((e) => `${e.reason}  ${e.doc}:${e.line}  ${e.ref}`).join('\n') ||
 						'no carriers affected'
 				};
+			}
+			case 'anchors': {
+				const result = await anchors(project());
+				const code = result.errors.length > 0 ? 2 : 0;
+				if (json) return { code, out: JSON.stringify(result, null, 2) };
+				const lines = [
+					...result.errors.map((e) => `error  ${e.file}:${e.line}  ${e.message}`),
+					...result.anchors.map((a) => {
+						const flag =
+							a.references.length === 0
+								? 'not used'
+								: `${a.references.length} reference(s): ${a.references.map((r) => `${r.doc}:${r.line}`).join(', ')}`;
+						return `${a.file}#@${a.name}  (line ${a.line})  ${flag}`;
+					})
+				];
+				return { code, out: lines.join('\n') || 'no region markers found' };
 			}
 			case 'ls': {
 				const index = await ls(project());

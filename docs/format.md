@@ -214,6 +214,10 @@ cross-repo aliases and scan scope:
 include = ["docs/**/*.md", "README.md"]   # default: **/*.md
 exclude = ["node_modules/**"]             # always excluded anyway
 
+[anchors]
+include = ["src/**"]                      # default: everything; where
+exclude = ["vendor/**"]                   # region markers are inventoried
+
 [repos.open-secret]
 url = "https://github.com/manchtools/open-secret"
 ref = "main"        # branch tracked by `docref update`; default: the

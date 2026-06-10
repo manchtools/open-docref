@@ -2,7 +2,7 @@
 // unit-testable: comment-leader detection, marker emission, the
 // symbol-vs-region choice, and the mappings from core reports to
 // diagnostics, tree nodes, and the status line.
-import type { Decl, Report, RefIndex, State } from '@open-docref/core';
+import type { AnchorsResult, Decl, Report, RefIndex, State } from '@open-docref/core';
 
 export type Leader =
 	| { kind: 'line'; open: string }
@@ -177,6 +177,43 @@ export function buildRefTree(index: RefIndex, report: Report | null): RefNode[] 
 		);
 		return { ref: r.ref, state: report ? state : 'unknown', locations };
 	});
+}
+
+export type AnchorTreeNode =
+	| {
+			kind: 'anchor';
+			label: string;
+			description: string;
+			file: string;
+			line: number;
+			used: boolean;
+			references: { doc: string; line: number; carrier: string }[];
+	  }
+	| { kind: 'error'; label: string; description: string; file: string; line: number };
+
+/** Errors first, then unused anchors (the actionable ones), then used. */
+export function buildAnchorTree(result: AnchorsResult): AnchorTreeNode[] {
+	const errors: AnchorTreeNode[] = result.errors.map((e) => ({
+		kind: 'error',
+		label: `${e.file}:${e.line}`,
+		description: e.message,
+		file: e.file,
+		line: e.line
+	}));
+	const anchorNodes: AnchorTreeNode[] = result.anchors.map((a) => ({
+		kind: 'anchor',
+		label: `${a.file}#@${a.name}`,
+		description:
+			a.references.length === 0
+				? 'not used'
+				: `${a.references.length} reference${a.references.length === 1 ? '' : 's'}`,
+		file: a.file,
+		line: a.line,
+		used: a.references.length > 0,
+		references: a.references
+	}));
+	anchorNodes.sort((a, b) => Number(a.kind === 'anchor' && a.used) - Number(b.kind === 'anchor' && b.used));
+	return [...errors, ...anchorNodes];
 }
 
 export function statusText(report: Report | null): string {
