@@ -162,6 +162,11 @@ exact field set, including the target id.
   region** (not of the prose) recorded at approval time. A claim
   without `sha=` is unapproved and reported as *stale-claim* until
   first approved.
+- A claim may pin **several anchors**: `src=` takes a comma-separated
+  list (no spaces), and `sha=` pairs one hash per source, in order.
+  The claim is broken if any source fails to resolve, stale if any
+  drifted, and approved only as a whole. Snippets stay single-source;
+  a fence materializes exactly one anchor.
 - Claims do not nest. `end` is bare.
 - The body is arbitrary markdown and belongs to the author. The tool
   never rewrites it.
@@ -219,6 +224,8 @@ exclude = ["node_modules/**"]             # always excluded anyway
 [anchors]
 include = ["src/**"]                      # default: everything; where
 exclude = ["vendor/**"]                   # region markers are inventoried
+allow-unused = false                      # default: an unreferenced
+                                          # marker fails `docref check`
 
 [repos.open-secret]
 url = "https://github.com/manchtools/open-secret"

@@ -14,10 +14,15 @@ holds the markdown.
 ### `docref check [paths...]`
 
 Scan the markdown (per `[scan]` config, or the given paths), resolve
-every snippet and claim, and report its state. Writes nothing.
+every snippet and claim, and report its state. Writes nothing. Also
+reports **unused anchors**: a region marker is declared intent, so one
+that nothing references fails the gate (opt out with
+`[anchors] allow-unused = true`); unused anchors are always computed
+against the whole project, even for a path-scoped check.
 
-- Exit `0`: everything `up-to-date`.
-- Exit `1`: at least one `stale-snippet` or `stale-claim`.
+- Exit `0`: everything `up-to-date`, no unused anchors.
+- Exit `1`: at least one `stale-snippet`, `stale-claim`, or unused
+  anchor.
 - Exit `2`: at least one `broken` reference or a configuration error.
 
 `--json` emits the report machine-readably:

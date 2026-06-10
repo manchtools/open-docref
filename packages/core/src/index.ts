@@ -27,6 +27,7 @@ export {
 	diff,
 	exitCode,
 	type ClaimDriftEntry,
+	type UnusedAnchor,
 	type AnchorEntry,
 	type AnchorsResult,
 	type State,

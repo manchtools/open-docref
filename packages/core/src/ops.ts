@@ -38,16 +38,20 @@ export type ReportEntry = {
 
 export type ReportError = { doc: string; line: number; code: string; message: string };
 
+export type UnusedAnchor = { file: string; name: string; line: number };
+
 export type Report = {
 	entries: ReportEntry[];
 	errors: ReportError[];
+	/** declared region markers nothing references (unless allow-unused) */
+	unusedAnchors: UnusedAnchor[];
 	summary: { upToDate: number; staleSnippet: number; staleClaim: number; broken: number };
 };
 
 export function exitCode(report: Report): 0 | 1 | 2 {
 	const s = report.summary;
 	if (report.errors.length > 0 || s.broken > 0) return 2;
-	if (s.staleSnippet > 0 || s.staleClaim > 0) return 1;
+	if (s.staleSnippet > 0 || s.staleClaim > 0 || report.unusedAnchors.length > 0) return 1;
 	return 0;
 }
 
@@ -103,7 +107,7 @@ type DocEvaluation = {
 	entries: ReportEntry[];
 	errors: ReportError[];
 	snippetEdits: SnippetEdit[];
-	claims: { carrier: Claim; anchor: Anchor | null; reason?: string }[];
+	claims: { carrier: Claim; anchors: (Anchor | null)[]; reason?: string }[];
 	text: string;
 };
 
@@ -123,20 +127,23 @@ async function evaluateDoc(
 
 	for (const c of references) {
 		const base = { doc, line: c.openLine, kind: c.kind, ref: c.ref } as const;
-		let anchor: Anchor;
-		try {
-			const ref = parseRef(c.ref);
-			anchor = await resolveAnchor(sourceFor(ref.alias), ref);
-		} catch (e) {
-			const reason = (e as Error).message;
-			out.entries.push({ ...base, state: 'broken', ...(c.sha ? { pinned: c.sha } : {}), reason });
-			if (c.kind === 'claim') out.claims.push({ carrier: c, anchor: null, reason });
-			continue;
-		}
 
-		const current = contentHash(anchor.content);
-		const cur8 = current.slice(0, 8);
 		if (c.kind === 'snippet') {
+			let anchor: Anchor;
+			try {
+				const ref = parseRef(c.ref);
+				anchor = await resolveAnchor(sourceFor(ref.alias), ref);
+			} catch (e) {
+				out.entries.push({
+					...base,
+					state: 'broken',
+					...(c.sha ? { pinned: c.sha } : {}),
+					reason: (e as Error).message
+				});
+				continue;
+			}
+			const current = contentHash(anchor.content);
+			const cur8 = current.slice(0, 8);
 			const upToDate = hashesMatch(c.sha, current) && contentHash(c.body) === current;
 			if (!upToDate) out.snippetEdits.push({ carrier: c, body: anchor.content, sha: cur8 });
 			out.entries.push({
@@ -145,16 +152,39 @@ async function evaluateDoc(
 				...(c.sha ? { pinned: c.sha } : {}),
 				current: cur8
 			});
-		} else {
-			const upToDate = hashesMatch(c.sha, current);
-			out.claims.push({ carrier: c, anchor });
-			out.entries.push({
-				...base,
-				state: upToDate ? 'up-to-date' : 'stale-claim',
-				...(c.sha ? { pinned: c.sha } : {}),
-				current: cur8
-			});
+			continue;
 		}
+
+		// a claim may pin several anchors; broken if ANY fails, stale if
+		// ANY drifted, approved only as a whole
+		const anchors: (Anchor | null)[] = [];
+		let reason: string | undefined;
+		for (const r of c.refs) {
+			try {
+				const ref = parseRef(r);
+				anchors.push(await resolveAnchor(sourceFor(ref.alias), ref));
+			} catch (e) {
+				anchors.push(null);
+				reason ??= (e as Error).message;
+			}
+		}
+		out.claims.push({ carrier: c, anchors, ...(reason ? { reason } : {}) });
+		if (reason) {
+			out.entries.push({ ...base, state: 'broken', ...(c.sha ? { pinned: c.sha } : {}), reason });
+			continue;
+		}
+		const currents = anchors.map((a) => contentHash(a!.content));
+		const shas = c.sha?.split(',');
+		const upToDate =
+			shas !== undefined &&
+			shas.length === currents.length &&
+			currents.every((h, k) => hashesMatch(shas[k], h));
+		out.entries.push({
+			...base,
+			state: upToDate ? 'up-to-date' : 'stale-claim',
+			...(c.sha ? { pinned: c.sha } : {}),
+			current: currents.map((h) => h.slice(0, 8)).join(',')
+		});
 	}
 
 	return out;
@@ -174,15 +204,27 @@ async function evaluate(
 	return result;
 }
 
-function toReport(evaluations: Map<string, DocEvaluation>): Report {
+function toReport(evaluations: Map<string, DocEvaluation>, unusedAnchors: UnusedAnchor[]): Report {
 	const entries = [...evaluations.values()].flatMap((e) => e.entries);
 	const errors = [...evaluations.values()].flatMap((e) => e.errors);
-	return { entries, errors, summary: summarize(entries) };
+	return { entries, errors, unusedAnchors, summary: summarize(entries) };
+}
+
+/**
+ * Declared markers nothing references; always computed against the
+ * whole project, so a path-scoped check cannot fake emptiness.
+ */
+async function findUnusedAnchors(project: Project): Promise<UnusedAnchor[]> {
+	if (project.anchors.allowUnused) return [];
+	const inventory = await anchors(project);
+	return inventory.anchors
+		.filter((a) => a.references.length === 0)
+		.map((a) => ({ file: a.file, name: a.name, line: a.line }));
 }
 
 /** Resolve and report every reference. Writes nothing. */
 export async function check(project: Project, paths?: string[]): Promise<Report> {
-	return toReport(await evaluate(project, paths));
+	return toReport(await evaluate(project, paths), await findUnusedAnchors(project));
 }
 
 /**
@@ -200,7 +242,10 @@ export async function refresh(
 		writeFileSync(join(project.root, doc), rewriteSnippets(ev.text, ev.snippetEdits));
 		changedDocs.push(doc);
 	}
-	return { report: toReport(await evaluate(project, paths)), changedDocs: changedDocs.sort() };
+	return {
+		report: toReport(await evaluate(project, paths), await findUnusedAnchors(project)),
+		changedDocs: changedDocs.sort()
+	};
 }
 
 /**
@@ -221,7 +266,7 @@ export async function approve(
 	for (const [doc, ev] of evaluations) {
 		const edits = [];
 		for (const claim of ev.claims) {
-			if (!claim.anchor) {
+			if (claim.anchors.some((a) => a === null)) {
 				refused.push({
 					doc,
 					line: claim.carrier.openLine,
@@ -232,7 +277,10 @@ export async function approve(
 				});
 				continue;
 			}
-			edits.push({ carrier: claim.carrier, sha: contentHash(claim.anchor.content).slice(0, 8) });
+			edits.push({
+				carrier: claim.carrier,
+				sha: claim.anchors.map((a) => contentHash(a!.content).slice(0, 8)).join(',')
+			});
 			approved++;
 		}
 		if (edits.length > 0) {
@@ -274,7 +322,13 @@ export async function update(
 	}
 
 	if (opts.checkOnly) {
-		return { changed, report: toReport(await evaluate(project, undefined, overrides)) };
+		return {
+			changed,
+			report: toReport(
+				await evaluate(project, undefined, overrides),
+				await findUnusedAnchors(project)
+			)
+		};
 	}
 
 	for (const [alias, rev] of Object.entries(overrides)) project.lock[alias] = { rev };
@@ -355,44 +409,50 @@ export async function diff(
 	for (const [doc, ev] of await evaluate(project, paths)) {
 		for (const claim of ev.claims) {
 			const c = claim.carrier;
-			const upToDate =
-				claim.anchor !== null && hashesMatch(c.sha, contentHash(claim.anchor.content));
-			if (upToDate) continue;
+			const shas = c.sha?.split(',');
+			// one drift entry per drifted source of the claim
+			for (let k = 0; k < c.refs.length; k++) {
+				const refRaw = c.refs[k]!;
+				const anchor = claim.anchors[k] ?? null;
+				const sha = shas?.[k];
+				if (anchor !== null && hashesMatch(sha, contentHash(anchor.content))) continue;
 
-			const entry: ClaimDriftEntry = { doc, line: c.openLine, ref: c.ref };
-			if (c.sha) entry.pinned = c.sha;
-			if (claim.anchor) {
-				entry.current = contentHash(claim.anchor.content).slice(0, 8);
-				entry.currentContent = claim.anchor.content;
-			} else if (claim.reason) {
-				entry.note = claim.reason;
-			}
-
-			if (!c.sha) {
-				entry.note = 'never approved; there is no prior state to recover';
-			} else {
-				const ref = parseRef(c.ref);
-				const gitDir = ref.alias
-					? undefined // shallow cross-repo caches carry no history in v1
-					: project.root;
-				try {
-					if (!gitDir) {
-						entry.note = 'cross-repo history is not searchable (shallow cache)';
-					} else {
-						const found = await findApproved(gitDir, c.ref, c.sha);
-						if (found) {
-							entry.approvedRev = found.rev;
-							entry.approvedContent = found.content;
-						} else {
-							entry.note =
-								entry.note ?? 'approved state not found in history (approved but never committed?)';
-						}
-					}
-				} catch {
-					entry.note = 'no git history to search (not a git repository)';
+				const entry: ClaimDriftEntry = { doc, line: c.openLine, ref: refRaw };
+				if (sha) entry.pinned = sha;
+				if (anchor) {
+					entry.current = contentHash(anchor.content).slice(0, 8);
+					entry.currentContent = anchor.content;
+				} else if (claim.reason) {
+					entry.note = claim.reason;
 				}
+
+				if (!sha) {
+					entry.note = 'never approved; there is no prior state to recover';
+				} else {
+					const ref = parseRef(refRaw);
+					const gitDir = ref.alias
+						? undefined // shallow cross-repo caches carry no history in v1
+						: project.root;
+					try {
+						if (!gitDir) {
+							entry.note = 'cross-repo history is not searchable (shallow cache)';
+						} else {
+							const found = await findApproved(gitDir, refRaw, sha);
+							if (found) {
+								entry.approvedRev = found.rev;
+								entry.approvedContent = found.content;
+							} else {
+								entry.note =
+									entry.note ??
+									'approved state not found in history (approved but never committed?)';
+							}
+						}
+					} catch {
+						entry.note = 'no git history to search (not a git repository)';
+					}
+				}
+				entries.push(entry);
 			}
-			entries.push(entry);
 		}
 	}
 	return { entries };
@@ -455,35 +515,37 @@ export async function affected(
 		const text = readFileSync(join(project.root, doc), 'utf8');
 		const { references } = scanMarkdown(text);
 		for (const c of references) {
-			let ref;
-			try {
-				ref = parseRef(c.ref);
-			} catch {
-				continue; // malformed references are check's findings, not affected's
-			}
-			if (ref.alias) continue;
-			const change = changes.get(ref.path);
-			if (!change) continue;
+			for (const refRaw of c.kind === 'claim' ? c.refs : [c.ref]) {
+				let ref;
+				try {
+					ref = parseRef(refRaw);
+				} catch {
+					continue; // malformed references are check's findings, not affected's
+				}
+				if (ref.alias) continue;
+				const change = changes.get(ref.path);
+				if (!change) continue;
 
-			const base = { doc, line: c.openLine, kind: c.kind, ref: c.ref } as const;
-			if (change.deleted) {
-				entries.push({ ...base, reason: 'broken' });
-				continue;
-			}
-			let anchor: Anchor;
-			try {
-				anchor = await resolveAnchor(sourceFor(undefined), ref);
-			} catch {
-				entries.push({ ...base, reason: 'broken' });
-				continue;
-			}
-			if (!anchor.span) {
-				entries.push({ ...base, reason: 'overlap' });
-				continue;
-			}
-			const { startLine, endLine } = anchor.span;
-			if (change.ranges.some(([a, b]) => a <= endLine && b >= startLine)) {
-				entries.push({ ...base, reason: 'overlap' });
+				const base = { doc, line: c.openLine, kind: c.kind, ref: refRaw } as const;
+				if (change.deleted) {
+					entries.push({ ...base, reason: 'broken' });
+					continue;
+				}
+				let anchor: Anchor;
+				try {
+					anchor = await resolveAnchor(sourceFor(undefined), ref);
+				} catch {
+					entries.push({ ...base, reason: 'broken' });
+					continue;
+				}
+				if (!anchor.span) {
+					entries.push({ ...base, reason: 'overlap' });
+					continue;
+				}
+				const { startLine, endLine } = anchor.span;
+				if (change.ranges.some(([a, b]) => a <= endLine && b >= startLine)) {
+					entries.push({ ...base, reason: 'overlap' });
+				}
 			}
 		}
 	}
@@ -560,15 +622,17 @@ export async function anchors(project: Project): Promise<AnchorsResult> {
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
 		for (const c of scanMarkdown(text).references) {
-			try {
-				const ref = parseRef(c.ref);
-				if (ref.alias || ref.fragment?.kind !== 'region') continue;
-				const key = `${ref.path}#@${ref.fragment.name}`;
-				const list = used.get(key) ?? [];
-				list.push({ doc, line: c.openLine, kind: c.kind });
-				used.set(key, list);
-			} catch {
-				// malformed references are check's findings
+			for (const r of c.kind === 'claim' ? c.refs : [c.ref]) {
+				try {
+					const ref = parseRef(r);
+					if (ref.alias || ref.fragment?.kind !== 'region') continue;
+					const key = `${ref.path}#@${ref.fragment.name}`;
+					const list = used.get(key) ?? [];
+					list.push({ doc, line: c.openLine, kind: c.kind });
+					used.set(key, list);
+				} catch {
+					// malformed references are check's findings
+				}
 			}
 		}
 	}
@@ -607,9 +671,11 @@ export async function ls(project: Project): Promise<RefIndex> {
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
 		for (const c of scanMarkdown(text).references) {
-			const locations = byRef.get(c.ref) ?? [];
-			locations.push({ doc, line: c.openLine, kind: c.kind });
-			byRef.set(c.ref, locations);
+			for (const r of c.kind === 'claim' ? c.refs : [c.ref]) {
+				const locations = byRef.get(r) ?? [];
+				locations.push({ doc, line: c.openLine, kind: c.kind });
+				byRef.set(r, locations);
+			}
 		}
 	}
 	return {

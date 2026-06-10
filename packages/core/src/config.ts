@@ -12,7 +12,7 @@ export type Project = {
 	root: string;
 	scan: { include: string[]; exclude: string[] };
 	/** where to look for region markers (the code-side inventory) */
-	anchors: { include: string[]; exclude: string[] };
+	anchors: { include: string[]; exclude: string[]; allowUnused: boolean };
 	repos: Record<string, RepoConfig>;
 	lock: Record<string, { rev: string }>;
 };
@@ -28,7 +28,7 @@ export function loadProject(root: string): Project {
 	const project: Project = {
 		root,
 		scan: { include: DEFAULT_INCLUDE, exclude: [...ALWAYS_EXCLUDE] },
-		anchors: { include: ['**/*'], exclude: [...ALWAYS_EXCLUDE] },
+		anchors: { include: ['**/*'], exclude: [...ALWAYS_EXCLUDE], allowUnused: false },
 		repos: {},
 		lock: {}
 	};
@@ -39,9 +39,12 @@ export function loadProject(root: string): Project {
 		const scan = t.scan as { include?: string[]; exclude?: string[] } | undefined;
 		if (scan?.include?.length) project.scan.include = scan.include;
 		if (scan?.exclude?.length) project.scan.exclude.push(...scan.exclude);
-		const anchors = t.anchors as { include?: string[]; exclude?: string[] } | undefined;
+		const anchors = t.anchors as
+			| { include?: string[]; exclude?: string[]; 'allow-unused'?: boolean }
+			| undefined;
 		if (anchors?.include?.length) project.anchors.include = anchors.include;
 		if (anchors?.exclude?.length) project.anchors.exclude.push(...anchors.exclude);
+		if (anchors?.['allow-unused'] === true) project.anchors.allowUnused = true;
 		const repos = (t.repos ?? {}) as Record<string, { url?: string; ref?: string }>;
 		for (const [alias, repo] of Object.entries(repos)) {
 			if (!repo.url) {

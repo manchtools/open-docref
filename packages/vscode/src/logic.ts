@@ -146,6 +146,14 @@ export function diagnosticsFromReport(report: Report): Map<string, DiagnosticDat
 	for (const e of report.errors) {
 		push(e.doc, { line: e.line, severity: 'error', message: e.message, code: e.code });
 	}
+	for (const u of report.unusedAnchors) {
+		push(u.file, {
+			line: u.line,
+			severity: 'warning',
+			message: `unused-anchor: nothing references ${u.file}#@${u.name}`,
+			code: 'unused-anchor'
+		});
+	}
 	return byDoc;
 }
 

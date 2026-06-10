@@ -155,11 +155,22 @@ const REPORT: Report = {
 			reason: 'missing-file'
 		}
 	],
-	errors: [{ doc: 'docs/c.md', line: 4, code: 'nested-pin', message: 'pin blocks do not nest' }],
+	errors: [{ doc: 'docs/c.md', line: 4, code: 'nested-claim', message: 'claim blocks do not nest' }],
+	unusedAnchors: [],
 	summary: { upToDate: 1, staleSnippet: 0, staleClaim: 1, broken: 1 }
 };
 
 describe('diagnosticsFromReport', () => {
+	it('squiggles unused anchors on their source files', () => {
+		const byDoc = diagnosticsFromReport({
+			...REPORT,
+			unusedAnchors: [{ file: 'src/x.ts', name: 'spare', line: 7 }]
+		});
+		expect(byDoc.get('src/x.ts')).toEqual([
+			expect.objectContaining({ line: 7, severity: 'warning', code: 'unused-anchor' })
+		]);
+	});
+
 	it('maps stale to warning, broken and scan errors to error, skips fresh', () => {
 		const byDoc = diagnosticsFromReport(REPORT);
 		expect(byDoc.get('docs/a.md')).toHaveLength(1);
@@ -268,6 +279,7 @@ describe('statusText', () => {
 			statusText({
 				entries: [],
 				errors: [],
+				unusedAnchors: [],
 				summary: { upToDate: 3, staleSnippet: 0, staleClaim: 0, broken: 0 }
 			})
 		).toBe('docref $(check) 3');
@@ -275,6 +287,7 @@ describe('statusText', () => {
 			statusText({
 				entries: [],
 				errors: [],
+				unusedAnchors: [],
 				summary: { upToDate: 1, staleSnippet: 1, staleClaim: 1, broken: 0 }
 			})
 		).toBe('docref $(warning) 2 stale');

@@ -26,7 +26,9 @@ export type Claim = {
 	closeLine: number;
 	indent: string;
 	tokens: string[];
+	/** the raw src= value; a claim may pin several anchors (comma list) */
 	ref: string;
+	refs: string[];
 	sha?: string;
 };
 
@@ -38,9 +40,14 @@ const CLAIM_BEGIN = /^(\s*)<!--\s*docref:\s*begin\s+(.+?)\s*-->\s*$/;
 const CLAIM_END = /^\s*<!--\s*docref:\s*end\s*-->\s*$/;
 const SHA = /^[0-9a-f]{8,64}$/i;
 
-type Attrs = { ref?: string; sha?: string };
+type Attrs = { ref?: string; refs?: string[]; sha?: string };
 
-/** Validate docref/sha attribute tokens; returns null with an error pushed. */
+/**
+ * Validate docref/sha attribute tokens; returns null with an error
+ * pushed. Claims (src=) may pin several anchors as a comma list with
+ * position-paired shas; snippets (docref=) are single-source, since a
+ * fence can materialize exactly one anchor.
+ */
 function readAttrs(
 	tokens: string[],
 	refKey: 'docref' | 'src',
@@ -48,30 +55,39 @@ function readAttrs(
 	errors: ScanError[]
 ): Attrs | null {
 	const attrs: Attrs = {};
+	const fail = (message: string): null => {
+		errors.push({ line, code: 'malformed-reference', message });
+		return null;
+	};
 	for (const t of tokens) {
 		const eq = t.indexOf('=');
 		if (eq < 1) continue; // opaque token, preserved but not ours
 		const key = t.slice(0, eq);
 		const value = t.slice(eq + 1);
 		if (key === refKey) {
-			try {
-				parseRef(value);
-			} catch (e) {
-				errors.push({ line, code: 'malformed-reference', message: (e as Error).message });
-				return null;
+			const refs = value.split(',');
+			if (refKey === 'docref' && refs.length > 1) {
+				return fail('a snippet materializes exactly one anchor; use a claim for several');
+			}
+			for (const r of refs) {
+				try {
+					parseRef(r);
+				} catch (e) {
+					return fail((e as Error).message);
+				}
 			}
 			attrs.ref = value;
+			attrs.refs = refs;
 		} else if (key === 'sha') {
-			if (!SHA.test(value)) {
-				errors.push({
-					line,
-					code: 'malformed-reference',
-					message: `sha "${value}" is not 8-64 hex characters`
-				});
-				return null;
+			const shas = value.split(',');
+			for (const s of shas) {
+				if (!SHA.test(s)) return fail(`sha "${s}" is not 8-64 hex characters`);
 			}
 			attrs.sha = value.toLowerCase();
 		}
+	}
+	if (attrs.ref && attrs.sha && attrs.sha.split(',').length !== attrs.refs!.length) {
+		return fail('the sha list must pair one hash per source, in order');
 	}
 	return attrs;
 }
@@ -173,6 +189,7 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 				indent,
 				tokens,
 				ref: attrs.ref,
+				refs: attrs.refs!,
 				...(attrs.sha !== undefined ? { sha: attrs.sha } : {}),
 				hasSha: attrs.sha !== undefined
 			};

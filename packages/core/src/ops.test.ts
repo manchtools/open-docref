@@ -112,6 +112,8 @@ describe('refresh: materializing snippets', () => {
 describe('claims: stale-claim and approve', () => {
 	function claimProject(): string {
 		const root = tmp();
+		// LIB_TS declares pi-part, which these docs never reference
+		write(root, 'docref.toml', '[anchors]\nallow-unused = true\n');
 		write(root, 'src/lib.ts', LIB_TS);
 		write(
 			root,
@@ -322,6 +324,90 @@ describe('anchors: the code-side inventory', () => {
 		write(root, 'src/s.ts', '// docref: begin mine\nx\n// docref: end mine\n');
 		const result = await anchors(loadProject(root));
 		expect(result.anchors.map((a) => a.name)).toEqual(['mine']);
+	});
+});
+
+describe('unused anchors fail the gate', () => {
+	// A region marker is declared intent; if nothing references it, check
+	// must say so (exit 1), not stay green. [anchors] allow-unused opts out.
+
+	it('check reports an unused marker and exits 1', async () => {
+		const root = tmp();
+		write(root, 'src/lib.ts', '// docref: begin spare\nconst s = 1;\n// docref: end spare\n');
+		const report = await check(loadProject(root));
+		expect(report.unusedAnchors).toEqual([
+			{ file: 'src/lib.ts', name: 'spare', line: 1 }
+		]);
+		expect(exitCode(report)).toBe(1);
+	});
+
+	it('a referenced marker is not unused', async () => {
+		const root = sameRepoProject(); // pi-part is referenced by docs/page.md
+		const report = await check(loadProject(root));
+		expect(report.unusedAnchors).toEqual([]);
+	});
+
+	it('allow-unused turns the gate green again', async () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[anchors]\nallow-unused = true\n');
+		write(root, 'src/lib.ts', '// docref: begin spare\nconst s = 1;\n// docref: end spare\n');
+		const report = await check(loadProject(root));
+		expect(report.unusedAnchors).toEqual([]);
+		expect(exitCode(report)).toBe(0);
+	});
+});
+
+describe('multi-source claims', () => {
+	function pairProject(): string {
+		const root = tmp();
+		write(root, 'src/a.ts', 'export function alpha(): number {\n\treturn 1;\n}\n');
+		write(root, 'src/b.ts', 'export function beta(): number {\n\treturn 2;\n}\n');
+		write(
+			root,
+			'docs/pair.md',
+			['<!-- docref: begin src=src/a.ts#alpha,src/b.ts#beta -->', 'Both halves documented.', '<!-- docref: end -->', ''].join('\n')
+		);
+		return root;
+	}
+
+	it('approves all sources and stays up to date until ANY drifts', async () => {
+		const root = pairProject();
+		const a = await approve(loadProject(root), ['docs/pair.md']);
+		expect(a.approved).toBe(1);
+		expect(read(root, 'docs/pair.md')).toMatch(/sha=[0-9a-f]{8},[0-9a-f]{8}/);
+		expect(exitCode(await check(loadProject(root)))).toBe(0);
+
+		write(root, 'src/b.ts', 'export function beta(): number {\n\treturn 3;\n}\n');
+		const report = await check(loadProject(root));
+		expect(report.summary.staleClaim).toBe(1);
+
+		await approve(loadProject(root), ['docs/pair.md']);
+		expect(exitCode(await check(loadProject(root)))).toBe(0);
+	});
+
+	it('is broken when any source fails to resolve, and approve refuses', async () => {
+		const root = pairProject();
+		write(root, 'src/b.ts', 'export function gamma(): number {\n\treturn 3;\n}\n');
+		const report = await check(loadProject(root));
+		expect(report.summary.broken).toBe(1);
+		const a = await approve(loadProject(root), ['docs/pair.md']);
+		expect(a.approved).toBe(0);
+		expect(a.refused).toHaveLength(1);
+	});
+
+	it('ls and anchors index every source of the claim', async () => {
+		const root = pairProject();
+		write(root, 'src/c.ts', '// docref: begin extra\nx\n// docref: end extra\n');
+		const index = await ls(loadProject(root));
+		expect(index.refs.map((r) => r.ref).sort()).toEqual(['src/a.ts#alpha', 'src/b.ts#beta']);
+
+		write(
+			root,
+			'docs/more.md',
+			['<!-- docref: begin src=src/c.ts#@extra,src/a.ts#alpha -->', 'p', '<!-- docref: end -->', ''].join('\n')
+		);
+		const result = await anchors(loadProject(root));
+		expect(result.anchors.find((x) => x.name === 'extra')?.references).toHaveLength(1);
 	});
 });
 

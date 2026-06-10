@@ -97,6 +97,15 @@ describe('docref CLI', () => {
 		expect(JSON.parse(json.out).anchors[0]).toMatchObject({ name: 'spare', references: [] });
 	});
 
+	it('check catches unused anchors', async () => {
+		const root = tmp();
+		write(root, 'src/lib.ts', '// docref: begin spare\nconst s = 1;\n// docref: end spare\n');
+		const res = await run(['check'], root);
+		expect(res.code).toBe(1);
+		expect(res.out).toContain('unused-anchor');
+		expect(res.out).toContain('src/lib.ts#@spare');
+	});
+
 	it('anchors exits 2 on marker errors', async () => {
 		const root = tmp();
 		write(root, 'src/broken.ts', '// docref: begin lonely\n');

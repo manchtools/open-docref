@@ -87,11 +87,12 @@ function renderReport(report: Report, json: boolean): string {
 	if (json) return JSON.stringify(report, null, 2);
 	const lines = [
 		...report.errors.map((e) => `error  ${e.doc}:${e.line}  ${e.message}`),
-		...report.entries.filter((e) => e.state !== 'up-to-date').map(entryLine)
+		...report.entries.filter((e) => e.state !== 'up-to-date').map(entryLine),
+		...report.unusedAnchors.map((u) => `unused-anchor  ${u.file}#@${u.name}  (line ${u.line})`)
 	];
 	const s = report.summary;
 	lines.push(
-		`${s.upToDate} up-to-date, ${s.staleSnippet} stale-snippet, ${s.staleClaim} stale-claim, ${s.broken} broken, ${report.errors.length} errors`
+		`${s.upToDate} up-to-date, ${s.staleSnippet} stale-snippet, ${s.staleClaim} stale-claim, ${s.broken} broken, ${report.unusedAnchors.length} unused-anchor, ${report.errors.length} errors`
 	);
 	return lines.join('\n');
 }

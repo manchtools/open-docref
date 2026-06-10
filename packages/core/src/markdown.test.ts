@@ -174,6 +174,46 @@ describe('scanMarkdown: claims', () => {
 		expect(errors).toEqual([]);
 	});
 
+	it('parses a multi-source claim: comma-separated refs, paired shas', () => {
+		const doc = [
+			'<!-- docref: begin src=src/Tabs.svelte#@props,src/Tab.svelte#@props sha=aabbccdd,11223344 -->',
+			'Documents both components of the pair.',
+			'<!-- docref: end -->'
+		].join('\n');
+		const { references, errors } = scanMarkdown(doc);
+		expect(errors).toEqual([]);
+		const c = references[0] as Claim;
+		expect(c.refs).toEqual(['src/Tabs.svelte#@props', 'src/Tab.svelte#@props']);
+		expect(c.sha).toBe('aabbccdd,11223344');
+	});
+
+	it('a single-source claim still exposes refs', () => {
+		const doc = '<!-- docref: begin src=src/a.go#Verify -->\np\n<!-- docref: end -->';
+		expect(claims(doc)[0]!.refs).toEqual(['src/a.go#Verify']);
+	});
+
+	it('rejects a sha count that does not match the ref count', () => {
+		const doc = [
+			'<!-- docref: begin src=a.ts#x,b.ts#y sha=aabbccdd -->',
+			'p',
+			'<!-- docref: end -->'
+		].join('\n');
+		const { errors } = scanMarkdown(doc);
+		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
+	});
+
+	it('rejects an invalid ref anywhere in the list', () => {
+		const doc = '<!-- docref: begin src=a.ts#x,/abs.ts#y -->\np\n<!-- docref: end -->';
+		const { errors } = scanMarkdown(doc);
+		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
+	});
+
+	it('snippets stay single-source: a comma list is malformed there', () => {
+		const doc = '```ts docref=a.ts#x,b.ts#y\n```\n';
+		const { errors } = scanMarkdown(doc);
+		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
+	});
+
 	it('finds a snippet inside a claim as an independent reference', () => {
 		const doc = [
 			`<!-- docref: begin src=src/a.ts#foo sha=${SHA} -->`,
