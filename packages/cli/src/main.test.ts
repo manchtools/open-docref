@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { run } from './main';
+import { symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { run, isMainEntry } from './main';
 import { tmp, write, read } from '../../core/src/testutil';
 
 // CLI contract (tooling.md section 1): exit 0 all fresh, 1 stale present,
@@ -61,5 +64,36 @@ describe('docref CLI', () => {
 		const res = await run(['frobnicate'], project());
 		expect(res.code).toBe(2);
 		expect(res.out.toLowerCase()).toContain('usage');
+	});
+});
+
+describe('isMainEntry: the bin guard', () => {
+	// Package managers install bins as SYMLINKS (~/.bun/bin/docref,
+	// node_modules/.bin/docref). The guard must follow them; comparing
+	// raw paths makes the CLI a silent no-op that always exits 0.
+	it('recognizes the module run directly', () => {
+		const dir = tmp();
+		const entry = join(dir, 'cli.js');
+		writeFileSync(entry, '');
+		expect(isMainEntry(entry, pathToFileURL(entry).href)).toBe(true);
+	});
+
+	it('recognizes the module run through a bin symlink', () => {
+		const dir = tmp();
+		const entry = join(dir, 'cli.js');
+		writeFileSync(entry, '');
+		const link = join(dir, 'docref');
+		symlinkSync(entry, link);
+		expect(isMainEntry(link, pathToFileURL(entry).href)).toBe(true);
+	});
+
+	it('stays false when the module is merely imported', () => {
+		const dir = tmp();
+		const entry = join(dir, 'cli.js');
+		const other = join(dir, 'vitest.js');
+		writeFileSync(entry, '');
+		writeFileSync(other, '');
+		expect(isMainEntry(other, pathToFileURL(entry).href)).toBe(false);
+		expect(isMainEntry(undefined, pathToFileURL(entry).href)).toBe(false);
 	});
 });

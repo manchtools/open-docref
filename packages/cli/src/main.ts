@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // docref CLI (tooling.md section 1). Exit codes: 0 everything fresh,
 // 1 stale carriers present, 2 broken carriers or config/usage errors.
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
 	findRoot,
@@ -138,15 +139,21 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 	}
 }
 
-const isMain = (() => {
+/**
+ * True when this module is the executed entry point. Bin shims are
+ * symlinks (~/.bun/bin/docref, node_modules/.bin/docref), so both sides
+ * compare by real path; a raw comparison would silently no-op the CLI.
+ */
+export function isMainEntry(argv1: string | undefined, moduleUrl: string): boolean {
+	if (!argv1) return false;
 	try {
-		return process.argv[1] === fileURLToPath(import.meta.url);
+		return realpathSync(argv1) === realpathSync(fileURLToPath(moduleUrl));
 	} catch {
 		return false;
 	}
-})();
+}
 
-if (isMain) {
+if (isMainEntry(process.argv[1], import.meta.url)) {
 	const { code, out } = await run(process.argv.slice(2), process.cwd());
 	if (out) console.log(out);
 	process.exit(code);
