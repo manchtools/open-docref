@@ -17,8 +17,7 @@ import {
 	anchors,
 	diff,
 	remove,
-	gitRevSource,
-	shortHash,
+	resolveReference,
 	snippetFenceText,
 	claimBlockText,
 	listDeclarations,
@@ -185,13 +184,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		const p = project();
 		if (!p) return null;
 		try {
-			const ref = parseRef(refRaw);
-			const source =
-				ref.alias !== undefined
-					? gitRevSource(p.repos[ref.alias]!.url, p.lock[ref.alias]!.rev)
-					: workingTreeSource(p.root);
-			const anchor = await resolveAnchor(source, ref);
-			return { content: anchor.content, sha: shortHash(anchor.content) };
+			return await resolveReference(p, refRaw);
 		} catch {
 			return null;
 		}

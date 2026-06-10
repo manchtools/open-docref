@@ -222,6 +222,21 @@ async function findUnusedAnchors(project: Project): Promise<UnusedAnchor[]> {
 		.map((a) => ({ file: a.file, name: a.name, line: a.line }));
 }
 
+/**
+ * Resolve one ref to its current content and sha: the primitive behind
+ * staging, the claim/snippet emit commands, and any place that needs a
+ * paste-ready pin without anything being referenced yet.
+ */
+export async function resolveReference(
+	project: Project,
+	refRaw: string
+): Promise<{ ref: string; sha: string; content: string }> {
+	const bare = splitShaSuffix(refRaw).ref;
+	const ref = parseRef(bare);
+	const anchor = await resolveAnchor(sourcePool(project)(ref.alias), ref);
+	return { ref: bare, sha: contentHash(anchor.content).slice(0, 8), content: anchor.content };
+}
+
 /** Resolve and report every reference. Writes nothing. */
 export async function check(project: Project, paths?: string[]): Promise<Report> {
 	return toReport(await evaluate(project, paths), await findUnusedAnchors(project));

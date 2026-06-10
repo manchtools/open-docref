@@ -29,6 +29,7 @@ export {
 	anchors,
 	diff,
 	remove,
+	resolveReference,
 	exitCode,
 	type ClaimDriftEntry,
 	type UnusedAnchor,

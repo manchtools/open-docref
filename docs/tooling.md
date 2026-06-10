@@ -76,6 +76,22 @@ cross-repo caches carry no history to search in v1. Snippets are
 excluded on purpose, their stale body IS the old code, so `refresh`
 plus an ordinary `git diff` of the document already shows the change.
 
+### `docref claim <ref...>` and `docref snippet <ref>`
+
+Print paste-ready text with the shas computed: `claim` emits a claim
+block (several refs make one multi-source claim), `snippet` emits a
+fully materialized fence. The shell is the CLI's staging area:
+
+```sh
+docref claim src/lib/server/site.ts#siteConfig >> docs/config.md
+docref snippet src/lib/server/markdown.ts#hashSlug >> docs/internals.md
+```
+
+Both fail closed (exit 2) when a ref does not resolve, and `--json`
+returns the text plus the resolved sources for agents. Nobody computes
+a hash by hand; either the tool emits it here, or approve/refresh
+record it later.
+
 ### `docref update [alias...] [--check]`
 
 For each alias (default: all): fetch the tracked branch, advance

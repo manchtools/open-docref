@@ -18,6 +18,9 @@ import {
 	anchors,
 	diff,
 	remove,
+	resolveReference,
+	claimBlockText,
+	snippetFenceText,
 	exitCode,
 	type Report,
 	type ReportEntry
@@ -34,6 +37,8 @@ commands:
   diff [paths...]             what changed since each stale claim was approved
   affected --since <rev>      references endangered by changes since <rev>
   ls                          the reverse index: refs and their locations
+  claim <ref...>              print a paste-ready claim block, shas computed
+  snippet <ref>               print a paste-ready materialized snippet
   remove <ref>                delete a reference everywhere, marker included
   anchors                     region markers in the code, unused ones flagged
 
@@ -169,6 +174,22 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 					return [head, ...sides].join('\n');
 				});
 				return { code: 0, out: blocks.join('\n\n') || 'every claim is up to date' };
+			}
+			case 'claim': {
+				if (rest.length === 0) return usage('claim takes one or more refs');
+				const sources = [];
+				for (const r of rest) sources.push(await resolveReference(project(), r));
+				const text = claimBlockText(sources);
+				if (json) return { code: 0, out: JSON.stringify({ text, sources: sources.map(({ ref, sha }) => ({ ref, sha })) }, null, 2) };
+				return { code: 0, out: text.trimEnd() };
+			}
+			case 'snippet': {
+				if (rest.length !== 1) return usage('snippet takes exactly one ref (a fence materializes one anchor)');
+				const resolved = await resolveReference(project(), rest[0]!);
+				const lang = resolved.ref.split('#')[0]!.split('/').pop()!.split('.').pop() ?? '';
+				const text = snippetFenceText(resolved.ref, resolved.sha, lang, resolved.content);
+				if (json) return { code: 0, out: JSON.stringify({ text, ref: resolved.ref, sha: resolved.sha }, null, 2) };
+				return { code: 0, out: text.trimEnd() };
 			}
 			case 'remove': {
 				if (rest.length !== 1) return usage('remove takes exactly one ref');

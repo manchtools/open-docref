@@ -85,6 +85,38 @@ describe('docref CLI', () => {
 		expect(parsed.entries[0].approvedRev).toMatch(/^[0-9a-f]{40}$/);
 	});
 
+	it('claim emits a paste-ready block, sha computed, multi-source capable', async () => {
+		const root = tmp();
+		write(root, 'src/a.ts', 'export function alpha(): number {\n\treturn 1;\n}\n');
+		write(root, 'src/b.ts', 'export function beta(): number {\n\treturn 2;\n}\n');
+		const res = await run(['claim', 'src/a.ts#alpha', 'src/b.ts#beta'], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toMatch(/src=src\/a\.ts#alpha:[0-9a-f]{8},src\/b\.ts#beta:[0-9a-f]{8}/);
+		// appending the output to a doc yields a valid, scannable claim
+		write(root, 'docs/d.md', res.out + '\n');
+		expect((await run(['check', '--json'], root)).out).toContain('"staleClaim": 0');
+	});
+
+	it('snippet emits a materialized fence that is born up to date', async () => {
+		const root = tmp();
+		write(root, 'src/lib.ts', 'export function greet(): string {\n\treturn "hi";\n}\n');
+		const res = await run(['snippet', 'src/lib.ts#greet'], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toMatch(/```ts docref=src\/lib\.ts#greet:[0-9a-f]{8}/);
+		expect(res.out).toContain('return "hi";');
+		write(root, 'docs/d.md', res.out + '\n');
+		const check = await run(['check'], root);
+		expect(check.code).toBe(0);
+	});
+
+	it('claim and snippet fail closed on refs that do not resolve', async () => {
+		const root = tmp();
+		expect((await run(['claim', 'src/gone.ts#x'], root)).code).toBe(2);
+		expect((await run(['snippet', 'src/gone.ts#x'], root)).code).toBe(2);
+		expect((await run(['snippet', 'a.ts#x', 'b.ts#y'], root)).code).toBe(2); // single source
+		expect((await run(['claim'], root)).code).toBe(2);
+	});
+
 	it('remove deletes a reference everywhere', async () => {
 		const root = tmp();
 		write(root, 'src/lib.ts', '// docref: begin bit\nconst x = 1;\n// docref: end bit\n');
