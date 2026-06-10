@@ -292,5 +292,13 @@ describe('statusText', () => {
 			})
 		).toBe('docref $(warning) 2 stale');
 		expect(statusText(REPORT)).toBe('docref $(error) 1 broken, 1 stale');
+		expect(
+			statusText({
+				entries: [],
+				errors: [],
+				unusedAnchors: [{ file: 'a.ts', name: 'x', line: 1 }],
+				summary: { upToDate: 2, staleSnippet: 0, staleClaim: 0, broken: 0 }
+			})
+		).toBe('docref $(warning) 1 unused');
 	});
 });

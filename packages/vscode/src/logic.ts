@@ -250,5 +250,8 @@ export function statusText(report: Report | null): string {
 	const broken = s.broken + report.errors.length;
 	if (broken > 0) return `docref $(error) ${s.broken} broken${stale ? `, ${stale} stale` : ''}`;
 	if (stale > 0) return `docref $(warning) ${stale} stale`;
+	if (report.unusedAnchors.length > 0) {
+		return `docref $(warning) ${report.unusedAnchors.length} unused`;
+	}
 	return `docref $(check) ${s.upToDate}`;
 }
