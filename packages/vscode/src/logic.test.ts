@@ -10,6 +10,7 @@ import {
 	diagnosticsFromReport,
 	buildRefTree,
 	buildAnchorTree,
+	isRelevantChange,
 	statusText
 } from './logic';
 
@@ -234,6 +235,29 @@ describe('buildAnchorTree', () => {
 			errors: []
 		});
 		expect(nodes[0]).toMatchObject({ description: '1 reference', used: true });
+	});
+});
+
+describe('isRelevantChange', () => {
+	// The background watcher sees every filesystem event; only changes
+	// that can move a docref state are worth a rescan.
+	const refPaths = new Set(['src/lib/server/site.ts']);
+	const anchorFiles = new Set(['src/lib/server/markdown.ts']);
+
+	it('rescans for markdown, config, referenced and anchored files', () => {
+		expect(isRelevantChange('docs/page.md', refPaths, anchorFiles)).toBe(true);
+		expect(isRelevantChange('docref.toml', refPaths, anchorFiles)).toBe(true);
+		expect(isRelevantChange('docref.lock', refPaths, anchorFiles)).toBe(true);
+		expect(isRelevantChange('src/lib/server/site.ts', refPaths, anchorFiles)).toBe(true);
+		expect(isRelevantChange('src/lib/server/markdown.ts', refPaths, anchorFiles)).toBe(true);
+	});
+
+	it('ignores unrelated files and build output churn', () => {
+		expect(isRelevantChange('src/lib/other.ts', refPaths, anchorFiles)).toBe(false);
+		expect(isRelevantChange('node_modules/x/index.md', refPaths, anchorFiles)).toBe(false);
+		expect(isRelevantChange('.git/HEAD', refPaths, anchorFiles)).toBe(false);
+		expect(isRelevantChange('.svelte-kit/output/page.md', refPaths, anchorFiles)).toBe(false);
+		expect(isRelevantChange('dist/docs/page.md', refPaths, anchorFiles)).toBe(false);
 	});
 });
 

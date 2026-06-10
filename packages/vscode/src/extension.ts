@@ -34,6 +34,7 @@ import {
 	diagnosticsFromReport,
 	buildRefTree,
 	buildAnchorTree,
+	isRelevantChange,
 	statusText,
 	type Leader,
 	type RefNode,
@@ -236,6 +237,23 @@ export function activate(context: vscode.ExtensionContext): void {
 		pending = setTimeout(() => void rescan(), 400);
 	}
 
+	// background watching, like the git extension: changes from the CLI,
+	// branch switches, or any external edit update the views unprompted
+	const watcher = vscode.workspace.createFileSystemWatcher('**/*');
+	function onFsEvent(uri: vscode.Uri): void {
+		const root = workspaceRoot();
+		if (!root || !uri.fsPath.startsWith(root + '/')) return;
+		const rel = relPath(uri, root).split('\\').join('/');
+		const refPaths = new Set(
+			(index?.refs ?? [])
+				.map((r) => r.ref)
+				.filter((ref) => !ref.includes(':'))
+				.map((ref) => ref.split('#')[0]!)
+		);
+		const anchorFiles = new Set((anchorIndex?.anchors ?? []).map((a) => a.file));
+		if (isRelevantChange(rel, refPaths, anchorFiles)) rescanSoon();
+	}
+
 	async function createAnchor(): Promise<void> {
 		const editor = vscode.window.activeTextEditor;
 		const root = workspaceRoot();
@@ -365,7 +383,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.languages.registerCodeLensProvider({ scheme: 'file' }, lensProvider),
 		vscode.commands.registerCommand('docref.createAnchor', createAnchor),
 		vscode.commands.registerCommand('docref.rescan', () => rescan()),
-		vscode.commands.registerCommand('docref.refreshFences', async () => {
+		vscode.commands.registerCommand('docref.refreshSnippets', async () => {
 			const p = project();
 			if (!p) return;
 			const { changedDocs } = await refresh(p);
@@ -451,7 +469,11 @@ export function activate(context: vscode.ExtensionContext): void {
 				if (picked) await vscode.commands.executeCommand('docref.openLocation', picked.l.doc, picked.l.line);
 			}
 		),
-		vscode.workspace.onDidSaveTextDocument(() => rescanSoon())
+		vscode.workspace.onDidSaveTextDocument(() => rescanSoon()),
+		watcher,
+		watcher.onDidChange(onFsEvent),
+		watcher.onDidCreate(onFsEvent),
+		watcher.onDidDelete(onFsEvent)
 	);
 
 	void rescan();

@@ -216,6 +216,25 @@ export function buildAnchorTree(result: AnchorsResult): AnchorTreeNode[] {
 	return [...errors, ...anchorNodes];
 }
 
+const NOISE = /(^|\/)(node_modules|\.git|\.svelte-kit|dist|build|out|coverage|target)(\/|$)/;
+
+/**
+ * Whether a filesystem change can move a docref state: markdown (a
+ * reference may have been edited), the config or lockfile, a file some
+ * reference points at, or a file with declared anchors. Everything
+ * else, build churn especially, is ignored.
+ */
+export function isRelevantChange(
+	rel: string,
+	refPaths: ReadonlySet<string>,
+	anchorFiles: ReadonlySet<string>
+): boolean {
+	if (NOISE.test(rel)) return false;
+	if (/\.(md|mdx|markdown)$/i.test(rel)) return true;
+	if (rel === 'docref.toml' || rel === 'docref.lock') return true;
+	return refPaths.has(rel) || anchorFiles.has(rel);
+}
+
 export function statusText(report: Report | null): string {
 	if (!report) return 'docref';
 	const s = report.summary;

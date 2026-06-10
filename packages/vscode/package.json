@@ -10,9 +10,13 @@
 	"engines": {
 		"vscode": "^1.90.0"
 	},
-	"categories": ["Other"],
+	"categories": [
+		"Other"
+	],
 	"main": "./dist/extension.cjs",
-	"activationEvents": ["onStartupFinished"],
+	"activationEvents": [
+		"onStartupFinished"
+	],
 	"contributes": {
 		"commands": [
 			{
@@ -25,8 +29,8 @@
 				"icon": "$(refresh)"
 			},
 			{
-				"command": "docref.refreshFences",
-				"title": "Docref: Refresh Stale Fences",
+				"command": "docref.refreshSnippets",
+				"title": "Docref: Refresh Stale Snippets",
 				"icon": "$(sync)"
 			},
 			{
@@ -63,8 +67,13 @@
 					"group": "navigation"
 				},
 				{
-					"command": "docref.refreshFences",
+					"command": "docref.refreshSnippets",
 					"when": "view == docrefRefs",
+					"group": "navigation"
+				},
+				{
+					"command": "docref.rescan",
+					"when": "view == docrefAnchors",
 					"group": "navigation"
 				}
 			]
