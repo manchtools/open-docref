@@ -11,7 +11,7 @@ export {
 	type PinCarrier,
 	type ScanError
 } from './markdown';
-export { listDeclarations, findSymbol, type Decl } from './symbols';
+export { listDeclarations, findSymbol, configureWasm, type Decl, type WasmConfig } from './symbols';
 export { languageForFile, type LanguageId, type LanguageInfo } from './languages';
 export { workingTreeSource, resolveAnchor, type FileSource, type Anchor } from './resolve';
 export { loadProject, writeLock, findRoot, type Project, type RepoConfig } from './config';

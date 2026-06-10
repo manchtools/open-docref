@@ -11,7 +11,7 @@
 		"check": "tsc --noEmit",
 		"build": "bun run build:cli && bun run build:ext",
 		"build:cli": "bun build packages/cli/src/main.ts --target=node --outfile=packages/cli/dist/docref.js",
-		"build:ext": "esbuild packages/vscode/src/extension.ts --bundle --format=cjs --platform=node --external:vscode --external:web-tree-sitter --external:tree-sitter-wasms --outfile=packages/vscode/dist/extension.cjs --log-override:empty-import-meta=silent"
+		"build:ext": "esbuild packages/vscode/src/extension.ts --bundle --format=cjs --platform=node --external:vscode --external:web-tree-sitter --external:tree-sitter-wasms --define:import.meta.url=__importMetaUrl --banner:js=\"var __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --log-override:empty-import-meta=silent --outfile=packages/vscode/dist/extension.cjs && node scripts/copy-ext-wasm.mjs"
 	},
 	"devDependencies": {
 		"@types/node": "^25.2.1",

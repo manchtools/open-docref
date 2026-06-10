@@ -194,6 +194,38 @@ describe('python symbols', () => {
 	});
 });
 
+describe('configureWasm', () => {
+	// Bundled hosts (the VSCode extension) cannot resolve wasm files
+	// through node_modules at runtime; they must be able to point the
+	// resolver at shipped copies, and the override must actually be used.
+	it('honors explicit wasm locations, failing closed on wrong ones', async () => {
+		const { configureWasm } = await import('./symbols');
+		const { createRequire } = await import('node:module');
+		const { dirname, join } = await import('node:path');
+		const req = createRequire(import.meta.url);
+
+		configureWasm({
+			runtimeWasm: req.resolve('web-tree-sitter/tree-sitter.wasm'),
+			grammarsDir: '/nonexistent/wasm'
+		});
+		try {
+			// javascript is not cached by earlier tests, so its grammar must
+			// come from the configured directory and therefore fail
+			await expect(findSymbol('function f() {}', 'src/a.js', 'f')).rejects.toThrow();
+		} finally {
+			configureWasm({
+				runtimeWasm: req.resolve('web-tree-sitter/tree-sitter.wasm'),
+				grammarsDir: join(dirname(req.resolve('tree-sitter-wasms/package.json')), 'out')
+			});
+		}
+
+		// with correct paths the same grammar loads: failures are not cached
+		const d = await findSymbol('function f() {}', 'src/a.js', 'f');
+		expect(d.content).toBe('function f() {}');
+		configureWasm(null);
+	});
+});
+
 describe('unsupported languages', () => {
 	it('fails closed and names the escape hatch', async () => {
 		try {

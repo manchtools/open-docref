@@ -10,24 +10,59 @@ import { languageForFile, type LanguageId } from './languages';
 
 export type Decl = { path: string[]; startLine: number; endLine: number; content: string };
 
-// works in ESM (vitest, the CLI) and inside a CJS bundle (the VSCode
-// extension), where import.meta does not exist but require does
-const require_: NodeJS.Require =
-	typeof require === 'function' ? require : createRequire(import.meta.url);
 let inited: Promise<void> | null = null;
 const languages = new Map<string, Promise<Language>>();
 const parsers = new Map<string, Parser>();
 
+export type WasmConfig = { runtimeWasm: string; grammarsDir: string };
+let wasmConfig: WasmConfig | null = null;
+
+/**
+ * Point the resolver at explicit wasm locations. Bundled hosts (the
+ * VSCode extension) ship the wasm files and MUST call this before any
+ * symbol resolution: inside a bundle neither import.meta.url nor a
+ * resolving require exists, so node_modules lookup is impossible.
+ * Pass null to restore the default package-based resolution.
+ */
+export function configureWasm(config: WasmConfig | null): void {
+	wasmConfig = config;
+}
+
+// Lazy on purpose: must never run at module load time, where a bundled
+// host would crash before it had the chance to call configureWasm().
+function packageResolve(spec: string): string {
+	const url = typeof import.meta !== 'undefined' ? import.meta.url : undefined;
+	if (url) return createRequire(url).resolve(spec);
+	if (typeof require === 'function' && typeof require.resolve === 'function') {
+		return require.resolve(spec);
+	}
+	throw new DocrefError(
+		'wasm-unresolvable',
+		`cannot locate "${spec}" from a bundle; call configureWasm() with explicit paths`
+	);
+}
+
+function runtimeWasmPath(name: string): string {
+	return wasmConfig ? wasmConfig.runtimeWasm : packageResolve(`web-tree-sitter/${name}`);
+}
+
+function grammarWasmPath(wasm: string): string {
+	const file = `tree-sitter-${wasm}.wasm`;
+	return wasmConfig
+		? `${wasmConfig.grammarsDir}/${file}`
+		: packageResolve(`tree-sitter-wasms/out/${file}`);
+}
+
 async function parserFor(wasm: string): Promise<Parser> {
-	// the runtime wasm must be located through the package, not relative
-	// to the executing file: a bundled CLI lives far from node_modules
-	inited ??= Parser.init({
-		locateFile: (name: string) => require_.resolve(`web-tree-sitter/${name}`)
-	});
+	inited ??= Parser.init({ locateFile: (name: string) => runtimeWasmPath(name) });
 	await inited;
 	let langPromise = languages.get(wasm);
 	if (!langPromise) {
-		langPromise = Language.load(require_.resolve(`tree-sitter-wasms/out/tree-sitter-${wasm}.wasm`));
+		// do not cache failures: a host may configureWasm() and retry
+		langPromise = Language.load(grammarWasmPath(wasm)).catch((e) => {
+			languages.delete(wasm);
+			throw e;
+		});
 		languages.set(wasm, langPromise);
 	}
 	const lang = await langPromise;

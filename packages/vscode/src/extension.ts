@@ -2,7 +2,9 @@
 // Everything that decides or formats lives in logic.ts (unit-tested);
 // this file only moves data between the core and the editor.
 import * as vscode from 'vscode';
+import { join } from 'node:path';
 import {
+	configureWasm,
 	findRoot,
 	loadProject,
 	check,
@@ -89,6 +91,13 @@ class RefTree implements vscode.TreeDataProvider<RefNode | RefNode['locations'][
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+	// inside the bundle nothing can resolve through node_modules; the
+	// build copies the wasm files into dist/wasm and we point core there
+	configureWasm({
+		runtimeWasm: join(context.extensionPath, 'dist', 'wasm', 'tree-sitter.wasm'),
+		grammarsDir: join(context.extensionPath, 'dist', 'wasm')
+	});
+
 	const diagnostics = vscode.languages.createDiagnosticCollection('docref');
 	const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
 	status.command = 'docrefRefs.focus';
