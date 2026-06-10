@@ -54,6 +54,23 @@ agent actually reading the prose. It therefore requires explicit
 paths; there is no `--all`. Refuses to approve a claim whose anchor is
 `broken`.
 
+### `docref diff [paths...] [--json]`
+
+For every claim that is not up to date: recover the content the
+approver saw and show it against the anchor's current content as a
+unified diff. The approved side comes from git, not from the claim (a
+claim stores only the hash): walk the anchored file's history, newest
+first, until a revision's anchor hashes to the recorded `sha=`. The
+drift becomes reviewable in one step instead of two hashes and an
+archaeology session.
+
+Informational, always exit `0` (`check` is the gate). Honest limits:
+the approved state must have been committed to be findable; claims
+that were never approved have no prior state to recover; and shallow
+cross-repo caches carry no history to search in v1. Snippets are
+excluded on purpose, their stale body IS the old code, so `refresh`
+plus an ordinary `git diff` of the document already shows the change.
+
 ### `docref update [alias...] [--check]`
 
 For each alias (default: all): fetch the tracked branch, advance
@@ -127,10 +144,11 @@ so the editor and CI can never disagree about what counts as stale.
   author still has context; the lens puts the doc debt in view exactly
   then. Click peeks the referencing locations.
 - **Markdown diagnostics:** stale and broken references get squiggles
-  with the state and both hashes. Quick fixes: *Refresh snippet*
-  (mechanical), *Approve claim* (offered only alongside a diff view of
-  the anchored code between approved and current), *Open source at
-  anchor*.
+  with the state and both hashes.
+- **Drift diffs:** *Show Claim Drift* opens one diff tab per stale
+  claim (approved content recovered from git history versus current),
+  and the *Approve Claims* flow opens the same diffs before its
+  confirmation, so approval happens next to the evidence.
 - **Create anchor:** select code, run "docref: create anchor". Inserts
   a marker pair (name prompted, comment leader auto-detected) or, when
   the selection is exactly a declaration, copies the symbol ref with no

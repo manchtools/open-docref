@@ -60,6 +60,31 @@ describe('docref CLI', () => {
 		expect(res.code).toBe(2);
 	});
 
+	it('diff shows what changed since a claim was approved', async () => {
+		const root = tmp();
+		const { execFileSync } = await import('node:child_process');
+		const g = (...a: string[]) => execFileSync('git', a, { cwd: root });
+		g('init', '-b', 'main');
+		g('config', 'user.name', 't');
+		g('config', 'user.email', 't@t');
+		write(root, 'src/lib.ts', 'export function greet(): string {\n\treturn "hi";\n}\n');
+		write(root, 'docs/c.md', '<!-- docref: begin src=src/lib.ts#greet -->\np\n<!-- docref: end -->\n');
+		await run(['approve', 'docs/c.md'], root);
+		g('add', '-A');
+		g('commit', '-q', '-m', 'approved');
+		write(root, 'src/lib.ts', read(root, 'src/lib.ts').replace('"hi"', '"hello"'));
+
+		const res = await run(['diff'], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toContain('src/lib.ts#greet');
+		expect(res.out).toContain('-\treturn "hi";');
+		expect(res.out).toContain('+\treturn "hello";');
+
+		const json = await run(['diff', '--json'], root);
+		const parsed = JSON.parse(json.out);
+		expect(parsed.entries[0].approvedRev).toMatch(/^[0-9a-f]{40}$/);
+	});
+
 	it('anchors lists region markers with a not-used flag', async () => {
 		const root = tmp();
 		write(root, 'src/lib.ts', '// docref: begin spare\nconst s = 1;\n// docref: end spare\n');

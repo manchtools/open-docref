@@ -32,6 +32,10 @@
 			{
 				"command": "docref.approveClaims",
 				"title": "Docref: Approve Claims in Current Document"
+			},
+			{
+				"command": "docref.showDrift",
+				"title": "Docref: Show Claim Drift"
 			}
 		],
 		"menus": {
@@ -43,6 +47,11 @@
 				},
 				{
 					"command": "docref.approveClaims",
+					"when": "resourceExtname == .md",
+					"group": "docref"
+				},
+				{
+					"command": "docref.showDrift",
 					"when": "resourceExtname == .md",
 					"group": "docref"
 				}

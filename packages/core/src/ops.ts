@@ -283,6 +283,121 @@ export async function update(
 	return { changed, report };
 }
 
+export type ClaimDriftEntry = {
+	doc: string;
+	line: number;
+	ref: string;
+	pinned?: string;
+	current?: string;
+	/** the commit whose anchor matches the recorded sha */
+	approvedRev?: string;
+	approvedContent?: string;
+	/** absent when the anchor no longer resolves */
+	currentContent?: string;
+	note?: string;
+};
+
+function singleFileSource(path: string, text: string): FileSource {
+	return { read: (p) => (p === path ? text : null), describe: () => 'history' };
+}
+
+/**
+ * Walk the anchored file's history (newest first) until a revision's
+ * anchor hashes to the recorded sha. Bounded; the approved state must
+ * have been committed to be findable.
+ */
+async function findApproved(
+	gitDir: string,
+	refRaw: string,
+	sha: string,
+	limit = 200
+): Promise<{ rev: string; content: string } | null> {
+	const ref = parseRef(refRaw);
+	const revs = execFileSync(
+		'git',
+		['log', `-${limit}`, '--format=%H', '--', ref.path],
+		{ cwd: gitDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+	)
+		.split('\n')
+		.filter(Boolean);
+	for (const rev of revs) {
+		let text: string;
+		try {
+			text = execFileSync('git', ['show', `${rev}:${ref.path}`], {
+				cwd: gitDir,
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe']
+			});
+		} catch {
+			continue; // file absent at this revision
+		}
+		let content: string;
+		try {
+			content = (await resolveAnchor(singleFileSource(ref.path, text), ref)).content;
+		} catch {
+			continue; // anchor absent or ambiguous at this revision
+		}
+		if (hashesMatch(sha, contentHash(content))) return { rev, content };
+	}
+	return null;
+}
+
+/**
+ * For every claim that is not up to date: recover the content the
+ * approver saw (via git history) next to the anchor's current content,
+ * so the drift is reviewable as a diff instead of two hashes.
+ */
+export async function diff(
+	project: Project,
+	paths?: string[]
+): Promise<{ entries: ClaimDriftEntry[] }> {
+	const entries: ClaimDriftEntry[] = [];
+	for (const [doc, ev] of await evaluate(project, paths)) {
+		for (const claim of ev.claims) {
+			const c = claim.carrier;
+			const upToDate =
+				claim.anchor !== null && hashesMatch(c.sha, contentHash(claim.anchor.content));
+			if (upToDate) continue;
+
+			const entry: ClaimDriftEntry = { doc, line: c.openLine, ref: c.ref };
+			if (c.sha) entry.pinned = c.sha;
+			if (claim.anchor) {
+				entry.current = contentHash(claim.anchor.content).slice(0, 8);
+				entry.currentContent = claim.anchor.content;
+			} else if (claim.reason) {
+				entry.note = claim.reason;
+			}
+
+			if (!c.sha) {
+				entry.note = 'never approved; there is no prior state to recover';
+			} else {
+				const ref = parseRef(c.ref);
+				const gitDir = ref.alias
+					? undefined // shallow cross-repo caches carry no history in v1
+					: project.root;
+				try {
+					if (!gitDir) {
+						entry.note = 'cross-repo history is not searchable (shallow cache)';
+					} else {
+						const found = await findApproved(gitDir, c.ref, c.sha);
+						if (found) {
+							entry.approvedRev = found.rev;
+							entry.approvedContent = found.content;
+						} else {
+							entry.note =
+								entry.note ?? 'approved state not found in history (approved but never committed?)';
+						}
+					}
+				} catch {
+					entry.note = 'no git history to search (not a git repository)';
+				}
+			}
+			entries.push(entry);
+		}
+	}
+	return { entries };
+}
+
 export type AffectedEntry = {
 	doc: string;
 	line: number;

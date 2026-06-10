@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // docref CLI (tooling.md section 1). Exit codes: 0 everything up to
 // date, 1 stale references present, 2 broken references or usage errors.
-import { realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
 	findRoot,
@@ -13,6 +16,7 @@ import {
 	affected,
 	ls,
 	anchors,
+	diff,
 	exitCode,
 	type Report,
 	type ReportEntry
@@ -26,6 +30,7 @@ commands:
   approve <paths...>          record claim approvals after reviewing the prose
   update [aliases...]         pin cross-repo aliases to their branch tips
          --check              dry run: report drift, write nothing
+  diff [paths...]             what changed since each stale claim was approved
   affected --since <rev>      references endangered by changes since <rev>
   ls                          the reverse index: refs and their locations
   anchors                     region markers in the code, unused ones flagged
@@ -53,6 +58,29 @@ function entryLine(e: ReportEntry): string {
 		e.pinned || e.current ? ` (${e.pinned ?? 'unapproved'} -> ${e.current ?? '?'})` : '';
 	const reason = e.reason ? ` ${e.reason}` : '';
 	return `${e.state}  ${e.doc}:${e.line}  ${e.ref}${hashes}${reason}`;
+}
+
+/** Unified diff of two strings via `git diff --no-index` (exit 1 = differ). */
+function unifiedDiff(approved: string, current: string): string {
+	const dir = mkdtempSync(join(tmpdir(), 'docref-diff-'));
+	try {
+		writeFileSync(join(dir, 'approved'), approved.endsWith('\n') ? approved : approved + '\n');
+		writeFileSync(join(dir, 'current'), current.endsWith('\n') ? current : current + '\n');
+		try {
+			execFileSync('git', ['diff', '--no-index', '--no-color', 'approved', 'current'], {
+				cwd: dir,
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe']
+			});
+			return '';
+		} catch (e) {
+			const out = (e as { stdout?: string }).stdout ?? '';
+			const at = out.indexOf('--- ');
+			return at >= 0 ? out.slice(at) : out;
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 }
 
 function renderReport(report: Report, json: boolean): string {
@@ -122,6 +150,22 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 						result.entries.map((e) => `${e.reason}  ${e.doc}:${e.line}  ${e.ref}`).join('\n') ||
 						'no references affected'
 				};
+			}
+			case 'diff': {
+				const result = await diff(project(), rest.length ? rest : undefined);
+				if (json) return { code: 0, out: JSON.stringify(result, null, 2) };
+				const blocks = result.entries.map((e) => {
+					const head = `${e.doc}:${e.line}  ${e.ref}  (${e.pinned ?? 'unapproved'} -> ${e.current ?? '?'})`;
+					if (e.approvedContent !== undefined && e.currentContent !== undefined) {
+						return `${head}\n  approved at ${e.approvedRev!.slice(0, 12)}\n${unifiedDiff(e.approvedContent, e.currentContent)}`;
+					}
+					const sides = [
+						e.approvedContent !== undefined ? `  approved at ${e.approvedRev!.slice(0, 12)}:\n${e.approvedContent}` : '',
+						e.note ? `  ${e.note}` : ''
+					].filter(Boolean);
+					return [head, ...sides].join('\n');
+				});
+				return { code: 0, out: blocks.join('\n\n') || 'every claim is up to date' };
 			}
 			case 'anchors': {
 				const result = await anchors(project());

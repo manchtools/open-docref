@@ -15,6 +15,7 @@ import {
 	approve,
 	ls,
 	anchors,
+	diff,
 	listDeclarations,
 	languageForFile,
 	scanRegions,
@@ -151,6 +152,42 @@ export function activate(context: vscode.ExtensionContext): void {
 		runtimeWasm: join(context.extensionPath, 'dist', 'wasm', 'tree-sitter.wasm'),
 		grammarsDir: join(context.extensionPath, 'dist', 'wasm')
 	});
+
+	// virtual documents backing the approved-vs-current drift diffs
+	const driftDocs = new Map<string, string>();
+	let driftSeq = 0;
+	const driftProvider: vscode.TextDocumentContentProvider = {
+		provideTextDocumentContent: (uri) => driftDocs.get(uri.path) ?? ''
+	};
+
+	/**
+	 * Open one diff tab per stale claim whose approved content is
+	 * recoverable from git history. Returns how many opened.
+	 */
+	async function openDrift(rel?: string): Promise<{ opened: number; total: number }> {
+		const p = project();
+		if (!p) return { opened: 0, total: 0 };
+		const { entries } = await diff(p, rel ? [rel] : undefined);
+		let opened = 0;
+		for (const e of entries) {
+			if (e.approvedContent === undefined || e.currentContent === undefined) continue;
+			const ext = e.ref.split('#')[0]!.split('.').pop() ?? 'txt';
+			const token = driftSeq++;
+			const left = vscode.Uri.parse(`docref-drift:/${token}/approved.${ext}`);
+			const right = vscode.Uri.parse(`docref-drift:/${token}/current.${ext}`);
+			driftDocs.set(left.path, e.approvedContent);
+			driftDocs.set(right.path, e.currentContent);
+			await vscode.commands.executeCommand(
+				'vscode.diff',
+				left,
+				right,
+				`${e.ref}  (approved ${e.pinned ?? '?'} -> ${e.current ?? '?'})`,
+				{ preview: false }
+			);
+			opened++;
+		}
+		return { opened, total: entries.length };
+	}
 
 	const diagnostics = vscode.languages.createDiagnosticCollection('docref');
 	const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
@@ -339,14 +376,31 @@ export function activate(context: vscode.ExtensionContext): void {
 			);
 			await rescan();
 		}),
+		vscode.workspace.registerTextDocumentContentProvider('docref-drift', driftProvider),
+		vscode.commands.registerCommand('docref.showDrift', async () => {
+			const editor = vscode.window.activeTextEditor;
+			const root = workspaceRoot();
+			const rel = editor && root ? relPath(editor.document.uri, root).split('\\').join('/') : undefined;
+			const { opened, total } = await openDrift(rel?.endsWith('.md') ? rel : undefined);
+			if (opened === 0) {
+				void vscode.window.showInformationMessage(
+					total === 0
+						? 'docref: every claim is up to date.'
+						: `docref: ${total} stale claim(s), but no approved state was found in git history.`
+				);
+			}
+		}),
 		vscode.commands.registerCommand('docref.approveClaims', async () => {
 			const p = project();
 			const editor = vscode.window.activeTextEditor;
 			const root = workspaceRoot();
 			if (!p || !editor || !root) return;
 			const rel = relPath(editor.document.uri, root).split('\\').join('/');
+			// show the evidence first: one diff tab per recoverable claim
+			const { opened } = await openDrift(rel);
 			const confirmed = await vscode.window.showWarningMessage(
-				`Approve all claims in ${rel}? Only do this after reading the claimed prose against the current code.`,
+				`Approve all claims in ${rel}? Only do this after reading the claimed prose against the current code.` +
+					(opened > 0 ? ` ${opened} drift diff(s) are open in the editor.` : ''),
 				{ modal: true },
 				'Approve'
 			);

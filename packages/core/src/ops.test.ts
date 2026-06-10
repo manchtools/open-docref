@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { loadProject } from './config';
-import { check, refresh, approve, update, affected, ls, anchors, exitCode } from './ops';
+import { check, refresh, approve, update, affected, ls, anchors, diff, exitCode } from './ops';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
 
 // Integration contract for the operations (tooling.md section 1 against the
@@ -322,6 +322,100 @@ describe('anchors: the code-side inventory', () => {
 		write(root, 'src/s.ts', '// docref: begin mine\nx\n// docref: end mine\n');
 		const result = await anchors(loadProject(root));
 		expect(result.anchors.map((a) => a.name)).toEqual(['mine']);
+	});
+});
+
+describe('diff: recovering what the approver saw', () => {
+	// A claim stores only the hash, so the approved content comes from git:
+	// walk the anchored file's history until a revision's anchor matches the
+	// recorded sha. Snippets are excluded (their stale body IS the old code).
+
+	const V1 = 'export function greet(): string {\n\treturn "hi";\n}\n';
+	function gitProject(): string {
+		const root = tmp();
+		initRepo(root);
+		write(root, 'src/lib.ts', V1);
+		write(
+			root,
+			'docs/claim.md',
+			['<!-- docref: begin src=src/lib.ts#greet -->', 'Greets tersely.', '<!-- docref: end -->', ''].join('\n')
+		);
+		return root;
+	}
+
+	it('finds the approved revision and returns both sides', async () => {
+		const root = gitProject();
+		await approve(loadProject(root), ['docs/claim.md']);
+		const rev = commitAll(root, 'approved state');
+		write(root, 'src/lib.ts', V1.replace('"hi"', '"hello"'));
+
+		const { entries } = await diff(loadProject(root));
+		expect(entries).toHaveLength(1);
+		const e = entries[0]!;
+		expect(e.ref).toBe('src/lib.ts#greet');
+		expect(e.approvedRev).toBe(rev);
+		expect(e.approvedContent).toContain('"hi"');
+		expect(e.currentContent).toContain('"hello"');
+	});
+
+	it('walks past newer commits to the matching revision', async () => {
+		const root = gitProject();
+		await approve(loadProject(root), ['docs/claim.md']);
+		const approvedAt = commitAll(root, 'v1 approved');
+		write(root, 'src/lib.ts', V1.replace('"hi"', '"hey"'));
+		commitAll(root, 'v2');
+		write(root, 'src/lib.ts', V1.replace('"hi"', '"hello"'));
+		commitAll(root, 'v3');
+
+		const { entries } = await diff(loadProject(root));
+		expect(entries[0]?.approvedRev).toBe(approvedAt);
+		expect(entries[0]?.approvedContent).toContain('"hi"');
+		expect(entries[0]?.currentContent).toContain('"hello"');
+	});
+
+	it('reports a never-approved claim instead of guessing', async () => {
+		const root = gitProject();
+		commitAll(root, 'base');
+		const { entries } = await diff(loadProject(root));
+		expect(entries[0]?.approvedRev).toBeUndefined();
+		expect(entries[0]?.note).toContain('never approved');
+	});
+
+	it('reports missing history outside a git repository', async () => {
+		const root = tmp();
+		write(root, 'src/lib.ts', V1);
+		write(
+			root,
+			'docs/claim.md',
+			['<!-- docref: begin src=src/lib.ts#greet -->', 'p', '<!-- docref: end -->', ''].join('\n')
+		);
+		await approve(loadProject(root), ['docs/claim.md']);
+		write(root, 'src/lib.ts', V1.replace('"hi"', '"hello"'));
+		const { entries } = await diff(loadProject(root));
+		expect(entries[0]?.approvedRev).toBeUndefined();
+		expect(entries[0]?.note).toContain('history');
+	});
+
+	it('still recovers the approved side when the anchor is now broken', async () => {
+		const root = gitProject();
+		await approve(loadProject(root), ['docs/claim.md']);
+		commitAll(root, 'approved');
+		write(root, 'src/lib.ts', V1.replace(/greet/g, 'salute'));
+
+		const { entries } = await diff(loadProject(root));
+		expect(entries[0]?.approvedContent).toContain('"hi"');
+		expect(entries[0]?.currentContent).toBeUndefined();
+		expect(entries[0]?.note).toBeTruthy();
+	});
+
+	it('excludes snippets and up-to-date claims', async () => {
+		const root = gitProject();
+		write(root, 'docs/snip.md', '```ts docref=src/lib.ts#greet\n```\n');
+		await approve(loadProject(root), ['docs/claim.md']);
+		commitAll(root, 'approved');
+		// snippet is stale (never refreshed), claim is up to date
+		const { entries } = await diff(loadProject(root));
+		expect(entries).toEqual([]);
 	});
 });
 
