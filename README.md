@@ -57,17 +57,25 @@ prose is still true.
 
 ## Status
 
-The core library and the CLI are implemented and tested (milestones 1
-through 4 of the plan): same-repo and cross-repo resolution, symbols
-(TypeScript, JavaScript, Go, Python) and regions, `check`, `refresh`,
-`bless`, `update`, `affected`, and `ls`. The VSCode extension
-(milestone 5) is next.
+The core library, the CLI, and a first cut of the VSCode extension are
+implemented and tested (milestones 1 through 5 of the plan): same-repo
+and cross-repo resolution, symbols (TypeScript, JavaScript, Go, Python)
+and regions, `check`, `refresh`, `bless`, `update`, `affected`, `ls`,
+and in the editor: create-anchor from a selection, the references
+sidebar with live states, drift diagnostics, referenced-by CodeLens,
+and a status-bar counter.
 
 ```sh
 bun install
 bun test          # the contract suite
-bun run build     # packages/cli/dist/docref.js
+bun run build     # CLI bundle + extension bundle
 ```
+
+To run the extension, open this repo in VSCode and press F5 (launches
+an Extension Development Host on ../open-docs), or symlink
+`packages/vscode` into your `~/.vscode/extensions` (or
+`~/.vscode-oss/extensions`) as `manchtools.open-docref-vscode-0.1.0`
+and restart the editor.
 
 - [docs/format.md](docs/format.md): the normative format specification
 - [docs/tooling.md](docs/tooling.md): CLI surface, CI patterns, VSCode

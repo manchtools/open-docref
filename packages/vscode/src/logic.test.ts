@@ -1,0 +1,213 @@
+import { describe, it, expect } from 'vitest';
+import { scanRegions, type Decl, type Report, type RefIndex } from '@open-docref/core';
+import {
+	commentLeaderFor,
+	markerLines,
+	suggestRegionName,
+	isValidRegionName,
+	normalizeSelectionLines,
+	symbolFragmentForSelection,
+	diagnosticsFromReport,
+	buildRefTree,
+	statusText
+} from './logic';
+
+// Contract for the extension's decision logic (tooling.md section 3). The
+// vscode API layer stays thin; everything that decides or formats is here
+// and testable: leader detection, marker emission that round-trips through
+// the core scanner, symbol-vs-region choice (exact span only), report to
+// diagnostics mapping, the tree model, and the status line.
+
+describe('commentLeaderFor', () => {
+	it('knows line-comment families', () => {
+		expect(commentLeaderFor('typescript')).toEqual({ kind: 'line', open: '//' });
+		expect(commentLeaderFor('go')).toEqual({ kind: 'line', open: '//' });
+		expect(commentLeaderFor('python')).toEqual({ kind: 'line', open: '#' });
+		expect(commentLeaderFor('sql')).toEqual({ kind: 'line', open: '--' });
+	});
+
+	it('knows block-comment families', () => {
+		expect(commentLeaderFor('html')).toEqual({ kind: 'block', open: '<!--', close: '-->' });
+		expect(commentLeaderFor('markdown')).toEqual({ kind: 'block', open: '<!--', close: '-->' });
+		expect(commentLeaderFor('css')).toEqual({ kind: 'block', open: '/*', close: '*/' });
+	});
+
+	it('returns null for unknown languages instead of guessing', () => {
+		expect(commentLeaderFor('brainfuck')).toBeNull();
+	});
+});
+
+describe('markerLines', () => {
+	it('emits line-leader markers with the indentation preserved', () => {
+		const m = markerLines('core-loop', { kind: 'line', open: '//' }, '\t');
+		expect(m.begin).toBe('\t// docref: begin core-loop');
+		expect(m.end).toBe('\t// docref: end core-loop');
+	});
+
+	it('emits block-leader markers with the closer', () => {
+		const m = markerLines('nav', { kind: 'block', open: '<!--', close: '-->' }, '');
+		expect(m.begin).toBe('<!-- docref: begin nav -->');
+		expect(m.end).toBe('<!-- docref: end nav -->');
+	});
+
+	it('round-trips through the core region scanner', () => {
+		for (const leader of [
+			{ kind: 'line', open: '#' } as const,
+			{ kind: 'block', open: '/*', close: '*/' } as const
+		]) {
+			const m = markerLines('pinned', leader, '  ');
+			const { regions, errors } = scanRegions(`${m.begin}\ncode\n${m.end}`);
+			expect(errors).toEqual([]);
+			expect(regions.has('pinned')).toBe(true);
+		}
+	});
+});
+
+describe('suggestRegionName', () => {
+	it('builds a kebab name from the selection words, skipping numbers', () => {
+		expect(suggestRegionName('const pi = 3.14159;\nreturn pi * r * r;', new Set())).toBe(
+			'const-pi'
+		);
+	});
+
+	it('dedupes against taken names', () => {
+		expect(suggestRegionName('const pi = 1;', new Set(['const-pi']))).toBe('const-pi-2');
+	});
+
+	it('falls back to "region" when nothing usable is selected', () => {
+		expect(suggestRegionName('!!! ???', new Set())).toBe('region');
+		expect(suggestRegionName('', new Set(['region']))).toBe('region-2');
+	});
+
+	it('always suggests something the validator accepts', () => {
+		for (const sel of ['Weird__NAME here', '   ', '$$$', 'x'.repeat(300)]) {
+			expect(isValidRegionName(suggestRegionName(sel, new Set()))).toBe(true);
+		}
+	});
+});
+
+describe('isValidRegionName', () => {
+	it('accepts kebab-case and rejects everything else', () => {
+		expect(isValidRegionName('foo-1')).toBe(true);
+		expect(isValidRegionName('Foo')).toBe(false);
+		expect(isValidRegionName('foo_bar')).toBe(false);
+		expect(isValidRegionName('')).toBe(false);
+		expect(isValidRegionName('-x')).toBe(false);
+	});
+});
+
+describe('normalizeSelectionLines', () => {
+	it('drops a trailing line the cursor only touches at column 0', () => {
+		expect(normalizeSelectionLines(5, 8, 0)).toEqual([5, 7]);
+	});
+
+	it('keeps a trailing line with real content selected', () => {
+		expect(normalizeSelectionLines(5, 8, 3)).toEqual([5, 8]);
+	});
+
+	it('never collapses below the start line', () => {
+		expect(normalizeSelectionLines(5, 5, 0)).toEqual([5, 5]);
+	});
+});
+
+describe('symbolFragmentForSelection', () => {
+	const decls: Decl[] = [
+		{ path: ['Renderer'], startLine: 1, endLine: 10, content: '' },
+		{ path: ['Renderer', 'run'], startLine: 2, endLine: 4, content: '' },
+		{ path: ['helper'], startLine: 12, endLine: 12, content: '' }
+	];
+
+	it('returns the dotted path when the selection spans exactly one declaration', () => {
+		expect(symbolFragmentForSelection(decls, 2, 4)).toBe('Renderer.run');
+		expect(symbolFragmentForSelection(decls, 12, 12)).toBe('helper');
+	});
+
+	it('returns null for partial selections: those want region markers', () => {
+		expect(symbolFragmentForSelection(decls, 3, 4)).toBeNull();
+		expect(symbolFragmentForSelection(decls, 2, 5)).toBeNull();
+	});
+
+	it('returns null when nothing matches', () => {
+		expect(symbolFragmentForSelection(decls, 20, 22)).toBeNull();
+	});
+});
+
+const REPORT: Report = {
+	entries: [
+		{ doc: 'docs/a.md', line: 3, carrier: 'fence', ref: 'src/x.ts#f', state: 'fresh' },
+		{
+			doc: 'docs/a.md',
+			line: 9,
+			carrier: 'pin',
+			ref: 'src/x.ts#@r',
+			state: 'stale-claim',
+			pinned: '11111111',
+			current: '22222222'
+		},
+		{
+			doc: 'docs/b.md',
+			line: 1,
+			carrier: 'fence',
+			ref: 'src/gone.ts#x',
+			state: 'broken',
+			reason: 'missing-file'
+		}
+	],
+	errors: [{ doc: 'docs/c.md', line: 4, code: 'nested-pin', message: 'pin blocks do not nest' }],
+	summary: { fresh: 1, staleSnippet: 0, staleClaim: 1, broken: 1 }
+};
+
+describe('diagnosticsFromReport', () => {
+	it('maps stale to warning, broken and scan errors to error, skips fresh', () => {
+		const byDoc = diagnosticsFromReport(REPORT);
+		expect(byDoc.get('docs/a.md')).toHaveLength(1);
+		expect(byDoc.get('docs/a.md')![0]).toMatchObject({ line: 9, severity: 'warning' });
+		expect(byDoc.get('docs/a.md')![0]!.message).toContain('stale-claim');
+		expect(byDoc.get('docs/b.md')![0]).toMatchObject({ line: 1, severity: 'error' });
+		expect(byDoc.get('docs/c.md')![0]).toMatchObject({ line: 4, severity: 'error' });
+		expect([...byDoc.values()].flat().some((d) => d.message.includes('fresh'))).toBe(false);
+	});
+});
+
+describe('buildRefTree', () => {
+	const index: RefIndex = {
+		refs: [
+			{ ref: 'src/gone.ts#x', locations: [{ doc: 'docs/b.md', line: 1, carrier: 'fence' }] },
+			{
+				ref: 'src/x.ts#f',
+				locations: [{ doc: 'docs/a.md', line: 3, carrier: 'fence' }]
+			}
+		]
+	};
+
+	it('rolls each ref up to its worst location state', () => {
+		const tree = buildRefTree(index, REPORT);
+		expect(tree.find((n) => n.ref === 'src/x.ts#f')?.state).toBe('fresh');
+		expect(tree.find((n) => n.ref === 'src/gone.ts#x')?.state).toBe('broken');
+	});
+
+	it('marks states unknown without a report', () => {
+		expect(buildRefTree(index, null).every((n) => n.state === 'unknown')).toBe(true);
+	});
+});
+
+describe('statusText', () => {
+	it('renders the three moods', () => {
+		expect(statusText(null)).toBe('docref');
+		expect(
+			statusText({
+				entries: [],
+				errors: [],
+				summary: { fresh: 3, staleSnippet: 0, staleClaim: 0, broken: 0 }
+			})
+		).toBe('docref $(check) 3');
+		expect(
+			statusText({
+				entries: [],
+				errors: [],
+				summary: { fresh: 1, staleSnippet: 1, staleClaim: 1, broken: 0 }
+			})
+		).toBe('docref $(warning) 2 stale');
+		expect(statusText(REPORT)).toBe('docref $(error) 1 broken, 1 stale');
+	});
+});

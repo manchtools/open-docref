@@ -1,0 +1,87 @@
+{
+	"name": "open-docref-vscode",
+	"displayName": "open-docref",
+	"description": "Anchor documentation to code: create docrefs from selections, see drift in the editor.",
+	"version": "0.1.0",
+	"publisher": "manchtools",
+	"license": "MIT",
+	"private": true,
+	"type": "module",
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": ["Other"],
+	"main": "./dist/extension.cjs",
+	"activationEvents": ["onStartupFinished"],
+	"contributes": {
+		"commands": [
+			{
+				"command": "docref.createAnchor",
+				"title": "Docref: Create Anchor from Selection"
+			},
+			{
+				"command": "docref.rescan",
+				"title": "Docref: Rescan",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "docref.refreshFences",
+				"title": "Docref: Refresh Stale Fences",
+				"icon": "$(sync)"
+			},
+			{
+				"command": "docref.blessDocument",
+				"title": "Docref: Bless Pins in Current Document"
+			}
+		],
+		"menus": {
+			"editor/context": [
+				{
+					"command": "docref.createAnchor",
+					"when": "editorHasSelection",
+					"group": "docref"
+				},
+				{
+					"command": "docref.blessDocument",
+					"when": "resourceExtname == .md",
+					"group": "docref"
+				}
+			],
+			"view/title": [
+				{
+					"command": "docref.rescan",
+					"when": "view == docrefRefs",
+					"group": "navigation"
+				},
+				{
+					"command": "docref.refreshFences",
+					"when": "view == docrefRefs",
+					"group": "navigation"
+				}
+			]
+		},
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "docref",
+					"title": "Docref",
+					"icon": "icon.svg"
+				}
+			]
+		},
+		"views": {
+			"docref": [
+				{
+					"id": "docrefRefs",
+					"name": "References"
+				}
+			]
+		}
+	},
+	"dependencies": {
+		"@open-docref/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/vscode": "^1.90.0"
+	}
+}

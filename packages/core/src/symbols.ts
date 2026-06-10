@@ -10,7 +10,10 @@ import { languageForFile, type LanguageId } from './languages';
 
 export type Decl = { path: string[]; startLine: number; endLine: number; content: string };
 
-const require_ = createRequire(import.meta.url);
+// works in ESM (vitest, the CLI) and inside a CJS bundle (the VSCode
+// extension), where import.meta does not exist but require does
+const require_: NodeJS.Require =
+	typeof require === 'function' ? require : createRequire(import.meta.url);
 let inited: Promise<void> | null = null;
 const languages = new Map<string, Promise<Language>>();
 const parsers = new Map<string, Parser>();

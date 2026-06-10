@@ -2,15 +2,20 @@
 	"name": "open-docref-workspace",
 	"private": true,
 	"type": "module",
-	"workspaces": ["packages/*"],
+	"workspaces": [
+		"packages/*"
+	],
 	"scripts": {
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"check": "tsc --noEmit",
-		"build": "bun build packages/cli/src/main.ts --target=node --outfile=packages/cli/dist/docref.js"
+		"build": "bun run build:cli && bun run build:ext",
+		"build:cli": "bun build packages/cli/src/main.ts --target=node --outfile=packages/cli/dist/docref.js",
+		"build:ext": "esbuild packages/vscode/src/extension.ts --bundle --format=cjs --platform=node --external:vscode --external:web-tree-sitter --external:tree-sitter-wasms --outfile=packages/vscode/dist/extension.cjs --log-override:empty-import-meta=silent"
 	},
 	"devDependencies": {
 		"@types/node": "^25.2.1",
+		"esbuild": "^0.28.0",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.8"
 	}
