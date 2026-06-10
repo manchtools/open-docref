@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+// docref CLI (tooling.md section 1). Exit codes: 0 everything fresh,
+// 1 stale carriers present, 2 broken carriers or config/usage errors.
+import { fileURLToPath } from 'node:url';
+import {
+	findRoot,
+	loadProject,
+	check,
+	refresh,
+	bless,
+	update,
+	affected,
+	ls,
+	exitCode,
+	type Report,
+	type ReportEntry
+} from '@open-docref/core';
+
+const USAGE = `usage: docref <command> [options]
+
+commands:
+  check [paths...]            report carrier states; writes nothing
+  refresh [paths...]          rewrite stale snippet fences (mechanical)
+  bless <paths...>            advance pin shas after reviewing the prose
+  update [aliases...]         pin cross-repo aliases to their branch tips
+         --check              dry run: report drift, write nothing
+  affected --since <rev>      carriers endangered by changes since <rev>
+  ls                          the reverse index: refs and their locations
+
+options:
+  --json                      machine-readable output`;
+
+function popFlag(args: string[], flag: string): boolean {
+	const at = args.indexOf(flag);
+	if (at === -1) return false;
+	args.splice(at, 1);
+	return true;
+}
+
+function popValue(args: string[], flag: string): string | undefined {
+	const at = args.indexOf(flag);
+	if (at === -1) return undefined;
+	const value = args[at + 1];
+	args.splice(at, 2);
+	return value;
+}
+
+function entryLine(e: ReportEntry): string {
+	const hashes =
+		e.pinned || e.current ? ` (${e.pinned ?? 'unblessed'} -> ${e.current ?? '?'})` : '';
+	const reason = e.reason ? ` ${e.reason}` : '';
+	return `${e.state}  ${e.doc}:${e.line}  ${e.ref}${hashes}${reason}`;
+}
+
+function renderReport(report: Report, json: boolean): string {
+	if (json) return JSON.stringify(report, null, 2);
+	const lines = [
+		...report.errors.map((e) => `error  ${e.doc}:${e.line}  ${e.message}`),
+		...report.entries.filter((e) => e.state !== 'fresh').map(entryLine)
+	];
+	const s = report.summary;
+	lines.push(
+		`${s.fresh} fresh, ${s.staleSnippet} stale-snippet, ${s.staleClaim} stale-claim, ${s.broken} broken, ${report.errors.length} errors`
+	);
+	return lines.join('\n');
+}
+
+export async function run(argv: string[], cwd: string): Promise<{ code: number; out: string }> {
+	const args = [...argv];
+	const json = popFlag(args, '--json');
+	const checkOnly = popFlag(args, '--check');
+	const since = popValue(args, '--since');
+	const [cmd, ...rest] = args;
+	const usage = (why: string) => ({ code: 2 as const, out: `${why}\n\n${USAGE}` });
+
+	try {
+		const project = () => loadProject(findRoot(cwd));
+		switch (cmd) {
+			case 'check': {
+				const report = await check(project(), rest.length ? rest : undefined);
+				return { code: exitCode(report), out: renderReport(report, json) };
+			}
+			case 'refresh': {
+				const { report, changedDocs } = await refresh(project(), rest.length ? rest : undefined);
+				if (json) return { code: exitCode(report), out: JSON.stringify({ changedDocs, ...report }, null, 2) };
+				const head = changedDocs.length ? changedDocs.map((d) => `refreshed  ${d}`).join('\n') + '\n' : '';
+				return { code: exitCode(report), out: head + renderReport(report, false) };
+			}
+			case 'bless': {
+				if (rest.length === 0) return usage('bless requires explicit paths');
+				const result = await bless(project(), rest);
+				const code = result.refused.length > 0 ? 2 : 0;
+				if (json) return { code, out: JSON.stringify(result, null, 2) };
+				const lines = [
+					`blessed ${result.blessed} pin(s) in ${result.changedDocs.length} file(s)`,
+					...result.refused.map((e) => `refused  ${e.doc}:${e.line}  ${e.ref}  ${e.reason ?? ''}`)
+				];
+				return { code, out: lines.join('\n') };
+			}
+			case 'update': {
+				const result = await update(project(), {
+					...(rest.length ? { aliases: rest } : {}),
+					checkOnly
+				});
+				const code = exitCode(result.report);
+				if (json) return { code, out: JSON.stringify(result, null, 2) };
+				const lines = result.changed.map(
+					(c) => `${checkOnly ? 'would pin' : 'pinned'}  ${c.alias}  ${c.from?.slice(0, 12) ?? '(new)'} -> ${c.to.slice(0, 12)}`
+				);
+				return { code, out: [...lines, renderReport(result.report, false)].join('\n') };
+			}
+			case 'affected': {
+				if (!since) return usage('affected requires --since <rev>');
+				const result = await affected(project(), since);
+				if (json) return { code: 0, out: JSON.stringify(result, null, 2) };
+				return {
+					code: 0,
+					out:
+						result.entries.map((e) => `${e.reason}  ${e.doc}:${e.line}  ${e.ref}`).join('\n') ||
+						'no carriers affected'
+				};
+			}
+			case 'ls': {
+				const index = await ls(project());
+				if (json) return { code: 0, out: JSON.stringify(index, null, 2) };
+				return {
+					code: 0,
+					out: index.refs
+						.flatMap((r) => [r.ref, ...r.locations.map((l) => `  ${l.doc}:${l.line} (${l.carrier})`)])
+						.join('\n')
+				};
+			}
+			default:
+				return usage(`unknown command "${cmd ?? ''}"`);
+		}
+	} catch (e) {
+		return { code: 2, out: (e as Error).message };
+	}
+}
+
+const isMain = (() => {
+	try {
+		return process.argv[1] === fileURLToPath(import.meta.url);
+	} catch {
+		return false;
+	}
+})();
+
+if (isMain) {
+	const { code, out } = await run(process.argv.slice(2), process.cwd());
+	if (out) console.log(out);
+	process.exit(code);
+}

@@ -57,8 +57,17 @@ prose is still true.
 
 ## Status
 
-Design phase. The format and tooling are specified; implementation has
-not started.
+The core library and the CLI are implemented and tested (milestones 1
+through 4 of the plan): same-repo and cross-repo resolution, symbols
+(TypeScript, JavaScript, Go, Python) and regions, `check`, `refresh`,
+`bless`, `update`, `affected`, and `ls`. The VSCode extension
+(milestone 5) is next.
+
+```sh
+bun install
+bun test          # the contract suite
+bun run build     # packages/cli/dist/docref.js
+```
 
 - [docs/format.md](docs/format.md): the normative format specification
 - [docs/tooling.md](docs/tooling.md): CLI surface, CI patterns, VSCode

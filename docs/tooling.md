@@ -79,9 +79,9 @@ of scope.
 
 ### `docref ls [--json]`
 
-Dump the reverse index: every anchor in the repository and every
-carrier referencing it. The extension's CodeLens and the agent's
-orientation pass both read this.
+Dump the reverse index: every referenced anchor and every carrier
+referencing it. The extension's CodeLens and the agent's orientation
+pass both read this.
 
 ## 2. CI patterns
 

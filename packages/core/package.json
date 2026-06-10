@@ -1,0 +1,15 @@
+{
+	"name": "@open-docref/core",
+	"version": "0.1.0",
+	"type": "module",
+	"license": "MIT",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"smol-toml": "^1.4.2",
+		"tinyglobby": "^0.2.15",
+		"tree-sitter-wasms": "^0.1.12",
+		"web-tree-sitter": "^0.25.10"
+	}
+}

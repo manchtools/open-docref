@@ -129,6 +129,10 @@ func (s *Server) VerifySignature(req *Request) error {
 - The body is **materialized**: the tool writes the extracted anchor
   contents into the fence and commits them. Readers and renderers see
   a complete, ordinary code block; nothing resolves at render time.
+- Extraction starts at the beginning of the anchor's first line and
+  removes the common leading indentation, so a method nested in a class
+  materializes flush left with its internal nesting preserved. This is
+  purely presentational; hashing strips all whitespace anyway.
 - The body is owned by the tool. Hand edits are detected (the body no
   longer hashes to `sha=`) and overwritten by the next refresh.
 

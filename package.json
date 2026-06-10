@@ -1,0 +1,17 @@
+{
+	"name": "open-docref-workspace",
+	"private": true,
+	"type": "module",
+	"workspaces": ["packages/*"],
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"check": "tsc --noEmit",
+		"build": "bun build packages/cli/src/main.ts --target=node --outfile=packages/cli/dist/docref.js"
+	},
+	"devDependencies": {
+		"@types/node": "^25.2.1",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.8"
+	}
+}
