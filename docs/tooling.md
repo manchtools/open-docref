@@ -46,15 +46,15 @@ against the whole project, even for a path-scoped check.
 
 ### `docref refresh [paths...]`
 
-Re-extract every snippet in scope and rewrite body and `sha=`.
+Re-extract every snippet in scope and rewrite its body and `:sha`.
 Touches only snippets (the mechanical state); never advances a
-claim's `sha=`. Idempotent. Exit codes as in `check`, evaluated after the
+claim's shas. Idempotent. Exit codes as in `check`, evaluated after the
 rewrite, so a repo whose only problems were stale snippets exits `0`.
 
 ### `docref approve <paths...>`
 
-Advance the `sha=` of claims in the given files to the anchors'
-current hashes. This is the judgment step: it must follow a human or
+Advance the `:sha` suffixes of claims in the given files to the
+anchors' current hashes. This is the judgment step: it must follow a human or
 agent actually reading the prose. It therefore requires explicit
 paths; there is no `--all`. Refuses to approve a claim whose anchor is
 `broken`.
@@ -65,7 +65,7 @@ For every claim that is not up to date: recover the content the
 approver saw and show it against the anchor's current content as a
 unified diff. The approved side comes from git, not from the claim (a
 claim stores only the hash): walk the anchored file's history, newest
-first, until a revision's anchor hashes to the recorded `sha=`. The
+first, until a revision's anchor hashes to the recorded sha. The
 drift becomes reviewable in one step instead of two hashes and an
 archaeology session.
 

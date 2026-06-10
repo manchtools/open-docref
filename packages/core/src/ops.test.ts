@@ -56,7 +56,7 @@ describe('refresh: materializing snippets', () => {
 		const doc = read(root, 'docs/page.md');
 		expect(doc).toContain("return 'hi ' + name;");
 		expect(doc).toContain('const pi = 3.14159;');
-		expect(doc).toMatch(/docref=src\/lib\.ts#greet sha=[0-9a-f]{8}/);
+		expect(doc).toMatch(/docref=src\/lib\.ts#greet:[0-9a-f]{8}/);
 
 		const report = await check(loadProject(root));
 		expect(report.summary).toEqual({ upToDate: 2, staleSnippet: 0, staleClaim: 0, broken: 0 });
@@ -132,7 +132,7 @@ describe('claims: stale-claim and approve', () => {
 		const b = await approve(loadProject(root), ['docs/claim.md']);
 		expect(b.approved).toBe(1);
 		expect(read(root, 'docs/claim.md')).toContain('Greets by name.');
-		expect(read(root, 'docs/claim.md')).toMatch(/begin src=src\/lib\.ts#greet sha=[0-9a-f]{8}/);
+		expect(read(root, 'docs/claim.md')).toMatch(/begin src=src\/lib\.ts#greet:[0-9a-f]{8} -->/);
 
 		report = await check(loadProject(root));
 		expect(report.summary).toEqual({ upToDate: 1, staleSnippet: 0, staleClaim: 0, broken: 0 });
@@ -374,7 +374,7 @@ describe('multi-source claims', () => {
 		const root = pairProject();
 		const a = await approve(loadProject(root), ['docs/pair.md']);
 		expect(a.approved).toBe(1);
-		expect(read(root, 'docs/pair.md')).toMatch(/sha=[0-9a-f]{8},[0-9a-f]{8}/);
+		expect(read(root, 'docs/pair.md')).toMatch(/#alpha:[0-9a-f]{8},src\/b\.ts#beta:[0-9a-f]{8}/);
 		expect(exitCode(await check(loadProject(root)))).toBe(0);
 
 		write(root, 'src/b.ts', 'export function beta(): number {\n\treturn 3;\n}\n');

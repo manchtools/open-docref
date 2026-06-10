@@ -19,7 +19,7 @@ No tool needs to be installed to read or write the format.
 A doc embeds a snippet that the tool keeps current:
 
 ````markdown
-```ts docref=src/lib/server/markdown.ts#applyFootnotes sha=4fa2b1c9
+```ts docref=src/lib/server/markdown.ts#applyFootnotes:4fa2b1c9
 export function applyFootnotes(content: string): string {
   ...
 }
@@ -29,7 +29,7 @@ export function applyFootnotes(content: string): string {
 A claim ties a paragraph to code in another repository:
 
 ```markdown
-<!-- docref: begin src=open-secret:src/api/handler.go#VerifySignature sha=9c2f1ab3 -->
+<!-- docref: begin src=open-secret:src/api/handler.go#VerifySignature:9c2f1ab3 -->
 The handler rejects any request whose signature does not cover the
 exact field set, including the target id.
 <!-- docref: end -->

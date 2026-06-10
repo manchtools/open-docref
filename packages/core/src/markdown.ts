@@ -26,10 +26,11 @@ export type Claim = {
 	closeLine: number;
 	indent: string;
 	tokens: string[];
-	/** the raw src= value; a claim may pin several anchors (comma list) */
+	/** bare refs joined with commas, for display */
 	ref: string;
 	refs: string[];
-	sha?: string;
+	/** one entry per ref, in order; undefined = that source unapproved */
+	shas: (string | undefined)[];
 };
 
 export type Reference = Snippet | Claim;
@@ -40,13 +41,36 @@ const CLAIM_BEGIN = /^(\s*)<!--\s*docref:\s*begin\s+(.+?)\s*-->\s*$/;
 const CLAIM_END = /^\s*<!--\s*docref:\s*end\s*-->\s*$/;
 const SHA = /^[0-9a-f]{8,64}$/i;
 
-type Attrs = { ref?: string; refs?: string[]; sha?: string };
+type Attrs = { ref?: string; refs?: string[]; shas?: (string | undefined)[] };
 
 /**
- * Validate docref/sha attribute tokens; returns null with an error
- * pushed. Claims (src=) may pin several anchors as a comma list with
- * position-paired shas; snippets (docref=) are single-source, since a
- * fence can materialize exactly one anchor.
+ * The sha rides on the ref it pins: `path#fragment:sha`. The alias
+ * separator is the FIRST colon of a ref, the sha suffix the LAST, and
+ * fragments cannot contain colons, so the two never collide.
+ */
+export function splitShaSuffix(part: string): { ref: string; sha?: string } {
+	const at = part.lastIndexOf(':');
+	if (at > 0) {
+		const suffix = part.slice(at + 1);
+		if (SHA.test(suffix)) {
+			const bare = part.slice(0, at);
+			try {
+				parseRef(bare);
+				return { ref: bare, sha: suffix.toLowerCase() };
+			} catch {
+				// the colon belonged to the ref itself; validate it whole
+			}
+		}
+	}
+	parseRef(part); // throws on an invalid ref
+	return { ref: part };
+}
+
+/**
+ * Validate reference tokens; returns null with an error pushed. Claims
+ * (src=) may pin several anchors as a comma list, each carrying its
+ * own `:sha`; snippets (docref=) are single-source, since a fence can
+ * materialize exactly one anchor.
  */
 function readAttrs(
 	tokens: string[],
@@ -65,29 +89,29 @@ function readAttrs(
 		const key = t.slice(0, eq);
 		const value = t.slice(eq + 1);
 		if (key === refKey) {
-			const refs = value.split(',');
-			if (refKey === 'docref' && refs.length > 1) {
+			const parts = value.split(',');
+			if (refKey === 'docref' && parts.length > 1) {
 				return fail('a snippet materializes exactly one anchor; use a claim for several');
 			}
-			for (const r of refs) {
+			const refs: string[] = [];
+			const shas: (string | undefined)[] = [];
+			for (const part of parts) {
 				try {
-					parseRef(r);
+					const split = splitShaSuffix(part);
+					refs.push(split.ref);
+					shas.push(split.sha);
 				} catch (e) {
 					return fail((e as Error).message);
 				}
 			}
-			attrs.ref = value;
+			attrs.ref = refs.join(',');
 			attrs.refs = refs;
+			attrs.shas = shas;
 		} else if (key === 'sha') {
-			const shas = value.split(',');
-			for (const s of shas) {
-				if (!SHA.test(s)) return fail(`sha "${s}" is not 8-64 hex characters`);
-			}
-			attrs.sha = value.toLowerCase();
+			return fail(
+				'the sha rides on the ref (path#fragment:sha); a separate sha= attribute is not part of the format'
+			);
 		}
-	}
-	if (attrs.ref && attrs.sha && attrs.sha.split(',').length !== attrs.refs!.length) {
-		return fail('the sha list must pair one hash per source, in order');
 	}
 	return attrs;
 }
@@ -99,7 +123,7 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 
 	let fence: { char: string; len: number } | null = null;
 	let pending: (Omit<Snippet, 'body' | 'closeLine'> & { bodyStart: number }) | null = null;
-	let claim: (Omit<Claim, 'closeLine'> & { hasSha: boolean }) | null = null;
+	let claim: Omit<Claim, 'closeLine'> | null = null;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i]!;
@@ -138,7 +162,7 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 				language,
 				tokens,
 				ref: attrs.ref,
-				...(attrs.sha !== undefined ? { sha: attrs.sha } : {}),
+				...(attrs.shas![0] !== undefined ? { sha: attrs.shas![0] } : {}),
 				bodyStart: i + 1
 			};
 			continue;
@@ -146,9 +170,7 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 
 		if (CLAIM_END.test(line)) {
 			if (claim) {
-				const { hasSha, ...rest } = claim;
-				void hasSha;
-				references.push({ ...rest, closeLine: i + 1 });
+				references.push({ ...claim, closeLine: i + 1 });
 				claim = null;
 			} else {
 				errors.push({ line: i + 1, code: 'unmatched-claim-end', message: 'claim end without a begin' });
@@ -190,8 +212,7 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 				tokens,
 				ref: attrs.ref,
 				refs: attrs.refs!,
-				...(attrs.sha !== undefined ? { sha: attrs.sha } : {}),
-				hasSha: attrs.sha !== undefined
+				shas: attrs.shas!
 			};
 		}
 	}
@@ -214,17 +235,9 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 	return { references, errors };
 }
 
-/** Place or update the sha token, keeping every other token in order. */
-function withSha(tokens: string[], anchorKey: string, sha: string): string[] {
-	const out = [...tokens];
-	const at = out.findIndex((t) => t.startsWith('sha='));
-	if (at >= 0) {
-		out[at] = `sha=${sha}`;
-		return out;
-	}
-	const anchorAt = out.findIndex((t) => t.startsWith(`${anchorKey}=`));
-	out.splice(anchorAt + 1, 0, `sha=${sha}`);
-	return out;
+/** Rewrite the ref token's value, keeping every other token in order. */
+function withRefValue(tokens: string[], anchorKey: string, value: string): string[] {
+	return tokens.map((t) => (t.startsWith(`${anchorKey}=`) ? `${anchorKey}=${value}` : t));
 }
 
 export type SnippetEdit = { carrier: Snippet; body: string; sha: string };
@@ -245,7 +258,7 @@ export function rewriteSnippets(text: string, edits: SnippetEdit[]): string {
 			if (run) maxRun = Math.max(maxRun, run[1]!.length);
 		}
 		const len = Math.max(c.fenceLen, maxRun + 1, 3);
-		const tokens = withSha(c.tokens, 'docref', sha);
+		const tokens = withRefValue(c.tokens, 'docref', `${c.ref}:${sha}`);
 		const openLine =
 			c.indent + c.fenceChar.repeat(len) + (c.language ? c.language + ' ' : '') + tokens.join(' ');
 		const closeLine = c.indent + c.fenceChar.repeat(len);
@@ -254,13 +267,14 @@ export function rewriteSnippets(text: string, edits: SnippetEdit[]): string {
 	return lines.join('\n');
 }
 
-export type ClaimEdit = { carrier: Claim; sha: string };
+export type ClaimEdit = { carrier: Claim; shas: string[] };
 
 /** Advance claim shas (the approval). Only the begin line is touched. */
 export function approveClaims(text: string, edits: ClaimEdit[]): string {
 	const lines = text.split('\n');
-	for (const { carrier: c, sha } of edits) {
-		const tokens = withSha(c.tokens, 'src', sha);
+	for (const { carrier: c, shas } of edits) {
+		const value = c.refs.map((r, k) => `${r}:${shas[k]}`).join(',');
+		const tokens = withRefValue(c.tokens, 'src', value);
 		lines[c.openLine - 1] = `${c.indent}<!-- docref: begin ${tokens.join(' ')} -->`;
 	}
 	return lines.join('\n');

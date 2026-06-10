@@ -291,7 +291,7 @@ describe('statusText', () => {
 				summary: { upToDate: 1, staleSnippet: 1, staleClaim: 1, broken: 0 }
 			})
 		).toBe('docref $(warning) 2 stale');
-		expect(statusText(REPORT)).toBe('docref $(error) 1 broken, 1 stale');
+		expect(statusText(REPORT)).toBe('docref $(error) 1 broken, 1 error, 1 stale');
 		expect(
 			statusText({
 				entries: [],

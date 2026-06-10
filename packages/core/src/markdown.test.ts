@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { scanMarkdown, rewriteSnippets, approveClaims, type Snippet, type Claim } from './markdown';
 
 // Contract (format.md sections 3 and 4): snippets are code blocks
-// whose info string carries docref= (required) and sha= (tool-written);
+// whose info string carries docref= (required); the sha rides the ref;
 // claims are <!-- docref: begin key=value... --> ... <!-- docref: end -->.
 // Fences nested in longer example fences are content, not references.
 // Claims do not nest. The name form (region marker in a markdown source
@@ -22,7 +22,7 @@ describe('scanMarkdown: snippets', () => {
 		const doc = [
 			'# Title',
 			'',
-			`\`\`\`ts docref=src/a.ts#foo sha=${SHA}`,
+			`\`\`\`ts docref=src/a.ts#foo:${SHA}`,
 			'const x = 1;',
 			'const y = 2;',
 			'```',
@@ -45,8 +45,8 @@ describe('scanMarkdown: snippets', () => {
 		expect(snippets('```ts\ncode\n```\n')).toHaveLength(0);
 	});
 
-	it('accepts attributes in any order and preserves unknown tokens', () => {
-		const doc = `\`\`\`go sha=${SHA} highlight=2 docref=src/a.go#X\ncode\n\`\`\`\n`;
+	it('preserves unknown tokens and strips the sha from the bare ref', () => {
+		const doc = `\`\`\`go highlight=2 docref=src/a.go#X:${SHA}\ncode\n\`\`\`\n`;
 		const f = snippets(doc)[0]!;
 		expect(f.ref).toBe('src/a.go#X');
 		expect(f.sha).toBe(SHA);
@@ -64,7 +64,7 @@ describe('scanMarkdown: snippets', () => {
 		// the README documents docref with a ts fence inside a markdown fence
 		const doc = [
 			'````markdown',
-			`\`\`\`ts docref=src/a.ts#foo sha=${SHA}`,
+			`\`\`\`ts docref=src/a.ts#foo:${SHA}`,
 			'code',
 			'```',
 			'````'
@@ -75,15 +75,28 @@ describe('scanMarkdown: snippets', () => {
 	});
 
 	it('supports tilde fences', () => {
-		const doc = `~~~py docref=src/a.py#run sha=${SHA}\npass\n~~~\n`;
+		const doc = `~~~py docref=src/a.py#run:${SHA}\npass\n~~~\n`;
 		expect(snippets(doc)[0]!.fenceChar).toBe('~');
 	});
 
-	it('rejects a malformed sha attribute', () => {
-		const doc = '```ts docref=src/a.ts#foo sha=XYZ\ncode\n```\n';
+	it('rejects the legacy sha= attribute with a pointer to the new form', () => {
+		const doc = '```ts docref=src/a.ts#foo sha=aabbccdd\ncode\n```\n';
 		const { references, errors } = scanMarkdown(doc);
 		expect(references).toHaveLength(0);
+		expect(errors.some((e) => e.code === 'malformed-reference' && e.message.includes(':'))).toBe(true);
+	});
+
+	it('a non-hex suffix is part of the fragment and fails ref parsing', () => {
+		const doc = '```ts docref=src/a.ts#foo:XYZ\ncode\n```\n';
+		const { errors } = scanMarkdown(doc);
 		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
+	});
+
+	it('a sha rides an aliased ref unambiguously', () => {
+		const doc = '```go docref=lib:src/a.go#Verify:aabbccdd\ncode\n```\n';
+		const f = snippets(doc)[0]!;
+		expect(f.ref).toBe('lib:src/a.go#Verify');
+		expect(f.sha).toBe('aabbccdd');
 	});
 
 	it('rejects an unparseable ref', () => {
@@ -93,7 +106,7 @@ describe('scanMarkdown: snippets', () => {
 	});
 
 	it('rejects an unclosed snippet', () => {
-		const doc = `\`\`\`ts docref=src/a.ts#foo sha=${SHA}\ncode\n`;
+		const doc = `\`\`\`ts docref=src/a.ts#foo:${SHA}\ncode\n`;
 		const { errors } = scanMarkdown(doc);
 		expect(errors.some((e) => e.code === 'unclosed-snippet')).toBe(true);
 	});
@@ -102,7 +115,7 @@ describe('scanMarkdown: snippets', () => {
 describe('scanMarkdown: claims', () => {
 	it('finds a claim with src and sha', () => {
 		const doc = [
-			`<!-- docref: begin src=src/a.go#Verify sha=${SHA} -->`,
+			`<!-- docref: begin src=src/a.go#Verify:${SHA} -->`,
 			'The handler rejects forged signatures.',
 			'<!-- docref: end -->'
 		].join('\n');
@@ -111,7 +124,7 @@ describe('scanMarkdown: claims', () => {
 		const p = references[0] as Claim;
 		expect(p.kind).toBe('claim');
 		expect(p.ref).toBe('src/a.go#Verify');
-		expect(p.sha).toBe(SHA);
+		expect(p.shas).toEqual([SHA]);
 		expect(p.openLine).toBe(1);
 		expect(p.closeLine).toBe(3);
 	});
@@ -120,7 +133,7 @@ describe('scanMarkdown: claims', () => {
 		const doc = '<!-- docref: begin src=src/a.go#Verify -->\nprose\n<!-- docref: end -->';
 		const { errors } = scanMarkdown(doc);
 		expect(errors).toEqual([]);
-		expect(claims(doc)[0]!.sha).toBeUndefined();
+		expect(claims(doc)[0]!.shas).toEqual([undefined]);
 	});
 
 	it('rejects a claim without src=', () => {
@@ -174,9 +187,9 @@ describe('scanMarkdown: claims', () => {
 		expect(errors).toEqual([]);
 	});
 
-	it('parses a multi-source claim: comma-separated refs, paired shas', () => {
+	it('parses a multi-source claim: each ref carries its own sha', () => {
 		const doc = [
-			'<!-- docref: begin src=src/Tabs.svelte#@props,src/Tab.svelte#@props sha=aabbccdd,11223344 -->',
+			'<!-- docref: begin src=src/Tabs.svelte#@props:aabbccdd,src/Tab.svelte#@props:11223344 -->',
 			'Documents both components of the pair.',
 			'<!-- docref: end -->'
 		].join('\n');
@@ -184,7 +197,7 @@ describe('scanMarkdown: claims', () => {
 		expect(errors).toEqual([]);
 		const c = references[0] as Claim;
 		expect(c.refs).toEqual(['src/Tabs.svelte#@props', 'src/Tab.svelte#@props']);
-		expect(c.sha).toBe('aabbccdd,11223344');
+		expect(c.shas).toEqual(['aabbccdd', '11223344']);
 	});
 
 	it('a single-source claim still exposes refs', () => {
@@ -192,14 +205,15 @@ describe('scanMarkdown: claims', () => {
 		expect(claims(doc)[0]!.refs).toEqual(['src/a.go#Verify']);
 	});
 
-	it('rejects a sha count that does not match the ref count', () => {
+	it('a partially approved claim is legal: missing shas mean unapproved sources', () => {
 		const doc = [
-			'<!-- docref: begin src=a.ts#x,b.ts#y sha=aabbccdd -->',
+			'<!-- docref: begin src=a.ts#x:aabbccdd,b.ts#y -->',
 			'p',
 			'<!-- docref: end -->'
 		].join('\n');
-		const { errors } = scanMarkdown(doc);
-		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
+		const { references, errors } = scanMarkdown(doc);
+		expect(errors).toEqual([]);
+		expect((references[0] as Claim).shas).toEqual(['aabbccdd', undefined]);
 	});
 
 	it('rejects an invalid ref anywhere in the list', () => {
@@ -216,10 +230,10 @@ describe('scanMarkdown: claims', () => {
 
 	it('finds a snippet inside a claim as an independent reference', () => {
 		const doc = [
-			`<!-- docref: begin src=src/a.ts#foo sha=${SHA} -->`,
+			`<!-- docref: begin src=src/a.ts#foo:${SHA} -->`,
 			'Claim about foo.',
 			'',
-			`\`\`\`ts docref=src/a.ts#foo sha=${SHA}`,
+			`\`\`\`ts docref=src/a.ts#foo:${SHA}`,
 			'code',
 			'```',
 			'<!-- docref: end -->'
@@ -237,7 +251,7 @@ describe('rewriteSnippets', () => {
 		const doc = `before\n\`\`\`ts docref=src/a.ts#foo highlight=2\nold\n\`\`\`\nafter\n`;
 		const f = snippets(doc)[0]!;
 		const out = rewriteSnippets(doc, [{ carrier: f, body: 'new line 1\nnew line 2', sha: SHA }]);
-		expect(out).toContain(`\`\`\`ts docref=src/a.ts#foo sha=${SHA} highlight=2`);
+		expect(out).toContain(`\`\`\`ts docref=src/a.ts#foo:${SHA} highlight=2`);
 		expect(out).toContain('new line 1\nnew line 2');
 		expect(out).not.toContain('old');
 		expect(out.startsWith('before\n')).toBe(true);
@@ -245,14 +259,14 @@ describe('rewriteSnippets', () => {
 	});
 
 	it('updates an existing sha in place', () => {
-		const doc = `\`\`\`ts docref=src/a.ts#foo sha=11111111\nold\n\`\`\`\n`;
+		const doc = `\`\`\`ts docref=src/a.ts#foo:11111111\nold\n\`\`\`\n`;
 		const out = rewriteSnippets(doc, [{ carrier: snippets(doc)[0]!, body: 'new', sha: SHA }]);
-		expect(out).toContain(`sha=${SHA}`);
-		expect(out).not.toContain('sha=11111111');
+		expect(out).toContain(`docref=src/a.ts#foo:${SHA}`);
+		expect(out).not.toContain('11111111');
 	});
 
 	it('lengthens the fence when the body itself contains a fence', () => {
-		const doc = `\`\`\`md docref=src/ex.md#@demo sha=${SHA}\nx\n\`\`\`\n`;
+		const doc = `\`\`\`md docref=src/ex.md#@demo:${SHA}\nx\n\`\`\`\n`;
 		const body = '```js\nrun()\n```';
 		const out = rewriteSnippets(doc, [{ carrier: snippets(doc)[0]!, body, sha: SHA }]);
 		// the rewritten doc must round-trip: one carrier, same body
@@ -289,15 +303,15 @@ describe('rewriteSnippets', () => {
 describe('approveClaims', () => {
 	it('writes sha on an unapproved claim without touching the prose', () => {
 		const doc = '<!-- docref: begin src=src/a.go#Verify -->\nThe exact claim.\n<!-- docref: end -->\n';
-		const out = approveClaims(doc, [{ carrier: claims(doc)[0]!, sha: SHA }]);
-		expect(out).toContain(`<!-- docref: begin src=src/a.go#Verify sha=${SHA} -->`);
+		const out = approveClaims(doc, [{ carrier: claims(doc)[0]!, shas: [SHA] }]);
+		expect(out).toContain(`<!-- docref: begin src=src/a.go#Verify:${SHA} -->`);
 		expect(out).toContain('The exact claim.');
 	});
 
 	it('advances an existing sha', () => {
-		const doc = `<!-- docref: begin src=src/a.go#Verify sha=11111111 -->\np\n<!-- docref: end -->\n`;
-		const out = approveClaims(doc, [{ carrier: claims(doc)[0]!, sha: SHA }]);
-		expect(out).toContain(`sha=${SHA}`);
-		expect(out).not.toContain('sha=11111111');
+		const doc = `<!-- docref: begin src=src/a.go#Verify:11111111 -->\np\n<!-- docref: end -->\n`;
+		const out = approveClaims(doc, [{ carrier: claims(doc)[0]!, shas: [SHA] }]);
+		expect(out).toContain(`src=src/a.go#Verify:${SHA}`);
+		expect(out).not.toContain('11111111');
 	});
 });

@@ -116,7 +116,7 @@ A snippet is an ordinary fenced code block whose info string carries
 docref attributes:
 
 ````markdown
-```go docref=open-secret:src/api/handler.go#VerifySignature sha=9c2f1ab3
+```go docref=open-secret:src/api/handler.go#VerifySignature:9c2f1ab3
 func (s *Server) VerifySignature(req *Request) error {
     ...
 }
@@ -126,8 +126,11 @@ func (s *Server) VerifySignature(req *Request) error {
 - The info string is: language word first (CommonMark convention, so
   syntax highlighting works everywhere), then space-separated
   `key=value` attributes in any order. Unknown keys are preserved.
-- `docref=` is required. `sha=` is written by the tool; a snippet without
-  it is treated as never-refreshed and is stale by definition.
+- `docref=` is required. The hash rides on the ref as a `:sha`
+  suffix, written by the tool; a snippet without one is treated as
+  never-refreshed and is stale by definition. The alias separator is
+  the first colon of a ref, the sha suffix the last, and fragments
+  cannot contain colons, so the two never collide.
 - The body is **materialized**: the tool writes the extracted anchor
   contents into the fence and commits them. Readers and renderers see
   a complete, ordinary code block; nothing resolves at render time.
@@ -136,10 +139,11 @@ func (s *Server) VerifySignature(req *Request) error {
   materializes flush left with its internal nesting preserved. This is
   purely presentational; hashing strips all whitespace anyway.
 - The body is owned by the tool. Hand edits are detected (the body no
-  longer hashes to `sha=`) and overwritten by the next refresh.
+  longer hashes to the recorded sha) and overwritten by the next
+  refresh.
 
-A snippet is *up-to-date* when the anchor's current hash, the `sha=`
-attribute, and the hash of the body all agree. Any disagreement makes
+A snippet is *up-to-date* when the anchor's current hash, the
+recorded `:sha`, and the hash of the body all agree. Any disagreement makes
 it *stale-snippet*; see section 5.
 
 ## 4. Claims (in markdown)
@@ -148,7 +152,7 @@ A claim ties a span of prose to an anchor: "this text was verified
 against that code".
 
 ```markdown
-<!-- docref: begin src=open-secret:src/api/handler.go#VerifySignature sha=9c2f1ab3 -->
+<!-- docref: begin src=open-secret:src/api/handler.go#VerifySignature:9c2f1ab3 -->
 The handler rejects any request whose signature does not cover the
 exact field set, including the target id.
 <!-- docref: end -->
@@ -158,20 +162,20 @@ exact field set, including the target id.
   as region markers. The argument forms differ: a code region takes a
   bare *name*; a claim takes `key=value` *attributes*. A token containing
   `=` is an attribute; otherwise it is a name.
-- `src=` is required. `sha=` is the hash of the **referenced code
-  region** (not of the prose) recorded at approval time. A claim
-  without `sha=` is unapproved and reported as *stale-claim* until
-  first approved.
+- `src=` is required. Each source carries its own hash as a `:sha`
+  suffix: the hash of the **referenced code** (not of the prose)
+  recorded at approval time. A source without a suffix is unapproved,
+  and the claim reports *stale-claim* until every source is approved.
 - A claim may pin **several anchors**: `src=` takes a comma-separated
-  list (no spaces), and `sha=` pairs one hash per source, in order.
-  The claim is broken if any source fails to resolve, stale if any
-  drifted, and approved only as a whole. Snippets stay single-source;
-  a fence materializes exactly one anchor.
+  list (no spaces), each entry its own `ref:sha`. The claim is broken
+  if any source fails to resolve, stale if any drifted, and approved
+  only as a whole. Snippets stay single-source; a fence materializes
+  exactly one anchor.
 - Claims do not nest. `end` is bare.
 - The body is arbitrary markdown and belongs to the author. The tool
   never rewrites it.
 - A snippet inside a claim is independent: its body still refreshes
-  mechanically. Only the claim's `sha=` requires an approval. This is
+  mechanically. Only the claim's shas require an approval. This is
   how a doc shows the current code *and* keeps a reviewed claim about
   it.
 
@@ -265,8 +269,8 @@ Every snippet and claim is in exactly one state:
 | State | Meaning | Resolution |
 |---|---|---|
 | `up-to-date` | anchor resolves, all hashes agree | nothing to do |
-| `stale-snippet` | a snippet whose anchor resolves but whose `sha=` or body disagrees with the anchor | mechanical: `docref refresh` |
-| `stale-claim` | a claim whose anchor resolves but whose `sha=` disagrees (or is absent) | judgment: read the prose, fix it if needed, `docref approve` |
+| `stale-snippet` | a snippet whose anchor resolves but whose recorded sha or body disagrees with the anchor | mechanical: `docref refresh` |
+| `stale-claim` | a claim whose anchors resolve but whose recorded shas disagree (or are absent) | judgment: read the prose, fix it if needed, `docref approve` |
 | `broken` | the anchor does not resolve: missing file, unknown symbol, ambiguous symbol, missing region, undeclared alias | author intervention; never auto-fixed |
 
 The defining rule of the whole system: **the tool may move anything in

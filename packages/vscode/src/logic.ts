@@ -248,7 +248,13 @@ export function statusText(report: Report | null): string {
 	const s = report.summary;
 	const stale = s.staleSnippet + s.staleClaim;
 	const broken = s.broken + report.errors.length;
-	if (broken > 0) return `docref $(error) ${s.broken} broken${stale ? `, ${stale} stale` : ''}`;
+	if (broken > 0) {
+		const parts = [];
+		if (s.broken) parts.push(`${s.broken} broken`);
+		if (report.errors.length) parts.push(`${report.errors.length} error${report.errors.length === 1 ? '' : 's'}`);
+		if (stale) parts.push(`${stale} stale`);
+		return `docref $(error) ${parts.join(', ')}`;
+	}
 	if (stale > 0) return `docref $(warning) ${stale} stale`;
 	if (report.unusedAnchors.length > 0) {
 		return `docref $(warning) ${report.unusedAnchors.length} unused`;

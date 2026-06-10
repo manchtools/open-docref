@@ -169,20 +169,19 @@ async function evaluateDoc(
 			}
 		}
 		out.claims.push({ carrier: c, anchors, ...(reason ? { reason } : {}) });
+		const pinned = c.shas.some(Boolean)
+			? c.shas.map((s) => s ?? 'unapproved').join(',')
+			: undefined;
 		if (reason) {
-			out.entries.push({ ...base, state: 'broken', ...(c.sha ? { pinned: c.sha } : {}), reason });
+			out.entries.push({ ...base, state: 'broken', ...(pinned ? { pinned } : {}), reason });
 			continue;
 		}
 		const currents = anchors.map((a) => contentHash(a!.content));
-		const shas = c.sha?.split(',');
-		const upToDate =
-			shas !== undefined &&
-			shas.length === currents.length &&
-			currents.every((h, k) => hashesMatch(shas[k], h));
+		const upToDate = currents.every((h, k) => hashesMatch(c.shas[k], h));
 		out.entries.push({
 			...base,
 			state: upToDate ? 'up-to-date' : 'stale-claim',
-			...(c.sha ? { pinned: c.sha } : {}),
+			...(pinned ? { pinned } : {}),
 			current: currents.map((h) => h.slice(0, 8)).join(',')
 		});
 	}
@@ -279,7 +278,7 @@ export async function approve(
 			}
 			edits.push({
 				carrier: claim.carrier,
-				sha: claim.anchors.map((a) => contentHash(a!.content).slice(0, 8)).join(',')
+				shas: claim.anchors.map((a) => contentHash(a!.content).slice(0, 8))
 			});
 			approved++;
 		}
@@ -409,12 +408,11 @@ export async function diff(
 	for (const [doc, ev] of await evaluate(project, paths)) {
 		for (const claim of ev.claims) {
 			const c = claim.carrier;
-			const shas = c.sha?.split(',');
 			// one drift entry per drifted source of the claim
 			for (let k = 0; k < c.refs.length; k++) {
 				const refRaw = c.refs[k]!;
 				const anchor = claim.anchors[k] ?? null;
-				const sha = shas?.[k];
+				const sha = c.shas[k];
 				if (anchor !== null && hashesMatch(sha, contentHash(anchor.content))) continue;
 
 				const entry: ClaimDriftEntry = { doc, line: c.openLine, ref: refRaw };
