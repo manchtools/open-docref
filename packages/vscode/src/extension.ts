@@ -7,6 +7,9 @@ import {
 	configureWasm,
 	findRoot,
 	loadProject,
+	parseRef,
+	workingTreeSource,
+	resolveAnchor,
 	check,
 	refresh,
 	approve,
@@ -74,6 +77,11 @@ class RefTree implements vscode.TreeDataProvider<RefNode | RefNode['locations'][
 			const item = new vscode.TreeItem(el.ref, vscode.TreeItemCollapsibleState.Expanded);
 			item.iconPath = STATE_ICONS[el.state];
 			item.description = el.state;
+			item.command = {
+				command: 'docref.openAnchor',
+				title: 'Open referenced code',
+				arguments: [el.ref]
+			};
 			return item;
 		}
 		const item = new vscode.TreeItem(`${el.doc}:${el.line}`, vscode.TreeItemCollapsibleState.None);
@@ -349,6 +357,27 @@ export function activate(context: vscode.ExtensionContext): void {
 					(result.refused.length ? `, refused ${result.refused.length} broken` : '')
 			);
 			await rescan();
+		}),
+		vscode.commands.registerCommand('docref.openAnchor', async (refRaw: string) => {
+			const root = workspaceRoot();
+			if (!root) return;
+			try {
+				const ref = parseRef(refRaw);
+				if (ref.alias) {
+					void vscode.window.showInformationMessage(
+						`docref: ${refRaw} lives in another repository (pinned via docref.lock); there is no local file to open.`
+					);
+					return;
+				}
+				const anchor = await resolveAnchor(workingTreeSource(root), ref);
+				await vscode.commands.executeCommand(
+					'docref.openLocation',
+					ref.path,
+					anchor.span?.startLine ?? 1
+				);
+			} catch (e) {
+				void vscode.window.showWarningMessage(`docref: ${(e as Error).message}`);
+			}
 		}),
 		vscode.commands.registerCommand('docref.openLocation', async (doc: string, line: number) => {
 			const root = workspaceRoot();
