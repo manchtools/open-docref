@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { loadProject } from './config';
-import { check, refresh, bless, update, affected, ls, anchors, exitCode } from './ops';
+import { check, refresh, approve, update, affected, ls, anchors, exitCode } from './ops';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
 
 // Integration contract for the operations (tooling.md section 1 against the
 // format in format.md): check reports the four states without writing;
-// refresh rewrites only fences; bless advances only pin shas and only for
-// explicit paths; update pins cross-repo revs in the lockfile; affected maps
-// working-tree changes to endangered carriers. The defining rule throughout:
-// the tool moves carriers in and out of stale-snippet on its own and never
+// refresh rewrites only snippets; approve advances only claim shas and
+// only for explicit paths; update pins cross-repo revs in the lockfile; affected maps
+// working-tree changes to endangered references. The defining rule throughout:
+// the tool moves references in and out of stale-snippet on its own and never
 // out of stale-claim or broken.
 
 let cacheDir: string;
@@ -47,8 +47,8 @@ function sameRepoProject(): string {
 	return root;
 }
 
-describe('refresh: materializing fences', () => {
-	it('fills bodies and shas, after which check is fresh and refresh idempotent', async () => {
+describe('refresh: materializing snippets', () => {
+	it('fills bodies and shas, after which check is up to date and refresh idempotent', async () => {
 		const root = sameRepoProject();
 		const r1 = await refresh(loadProject(root));
 		expect(r1.changedDocs).toEqual(['docs/page.md']);
@@ -59,7 +59,7 @@ describe('refresh: materializing fences', () => {
 		expect(doc).toMatch(/docref=src\/lib\.ts#greet sha=[0-9a-f]{8}/);
 
 		const report = await check(loadProject(root));
-		expect(report.summary).toEqual({ fresh: 2, staleSnippet: 0, staleClaim: 0, broken: 0 });
+		expect(report.summary).toEqual({ upToDate: 2, staleSnippet: 0, staleClaim: 0, broken: 0 });
 		expect(exitCode(report)).toBe(0);
 
 		const r2 = await refresh(loadProject(root));
@@ -67,7 +67,7 @@ describe('refresh: materializing fences', () => {
 		expect(read(root, 'docs/page.md')).toBe(doc);
 	});
 
-	it('detects a hand-edited fence body and restores it', async () => {
+	it('detects a hand-edited snippet body and restores it', async () => {
 		const root = sameRepoProject();
 		await refresh(loadProject(root));
 		write(root, 'docs/page.md', read(root, 'docs/page.md').replace("'hi ' + name", "'yo ' + name"));
@@ -88,7 +88,7 @@ describe('refresh: materializing fences', () => {
 
 		const report = await check(loadProject(root));
 		expect(report.summary.staleSnippet).toBe(1);
-		expect(report.summary.fresh).toBe(1);
+		expect(report.summary.upToDate).toBe(1);
 		const stale = report.entries.find((e) => e.state === 'stale-snippet');
 		expect(stale?.ref).toBe('src/lib.ts#greet');
 		expect(stale?.pinned).not.toBe(stale?.current);
@@ -104,13 +104,13 @@ describe('refresh: materializing fences', () => {
 		await refresh(loadProject(root));
 		const report = await check(loadProject(root));
 		expect(report.errors).toEqual([]);
-		expect(report.summary.fresh).toBe(1);
+		expect(report.summary.upToDate).toBe(1);
 		expect(read(root, 'docs/page.md')).toContain('run()');
 	});
 });
 
-describe('pins: stale-claim and bless', () => {
-	function pinProject(): string {
+describe('claims: stale-claim and approve', () => {
+	function claimProject(): string {
 		const root = tmp();
 		write(root, 'src/lib.ts', LIB_TS);
 		write(
@@ -121,44 +121,44 @@ describe('pins: stale-claim and bless', () => {
 		return root;
 	}
 
-	it('an unblessed pin is stale-claim; bless makes it fresh; prose is never touched', async () => {
-		const root = pinProject();
+	it('an unapproved claim is stale-claim; approve makes it up to date; prose is never touched', async () => {
+		const root = claimProject();
 		let report = await check(loadProject(root));
 		expect(report.summary.staleClaim).toBe(1);
 		expect(exitCode(report)).toBe(1);
 
-		const b = await bless(loadProject(root), ['docs/claim.md']);
-		expect(b.blessed).toBe(1);
+		const b = await approve(loadProject(root), ['docs/claim.md']);
+		expect(b.approved).toBe(1);
 		expect(read(root, 'docs/claim.md')).toContain('Greets by name.');
 		expect(read(root, 'docs/claim.md')).toMatch(/begin src=src\/lib\.ts#greet sha=[0-9a-f]{8}/);
 
 		report = await check(loadProject(root));
-		expect(report.summary).toEqual({ fresh: 1, staleSnippet: 0, staleClaim: 0, broken: 0 });
+		expect(report.summary).toEqual({ upToDate: 1, staleSnippet: 0, staleClaim: 0, broken: 0 });
 	});
 
-	it('a source change makes the pin stale-claim and refresh must NOT clear it', async () => {
-		const root = pinProject();
-		await bless(loadProject(root), ['docs/claim.md']);
+	it('a source change makes the claim stale-claim and refresh must NOT clear it', async () => {
+		const root = claimProject();
+		await approve(loadProject(root), ['docs/claim.md']);
 		write(root, 'src/lib.ts', LIB_TS.replace("'hi ' + name", "'hello ' + name"));
 
 		let report = await check(loadProject(root));
 		expect(report.summary.staleClaim).toBe(1);
 
-		// the defining rule: refresh is mechanical and may not bless
+		// the defining rule: refresh is mechanical and may not approve
 		await refresh(loadProject(root));
 		report = await check(loadProject(root));
 		expect(report.summary.staleClaim).toBe(1);
 
-		await bless(loadProject(root), ['docs/claim.md']);
+		await approve(loadProject(root), ['docs/claim.md']);
 		expect(exitCode(await check(loadProject(root)))).toBe(0);
 	});
 
-	it('bless refuses a broken pin and writes nothing', async () => {
+	it('approve refuses a broken claim and writes nothing', async () => {
 		const root = tmp();
 		write(root, 'docs/claim.md', '<!-- docref: begin src=src/gone.ts#x -->\np\n<!-- docref: end -->\n');
 		const before = read(root, 'docs/claim.md');
-		const b = await bless(loadProject(root), ['docs/claim.md']);
-		expect(b.blessed).toBe(0);
+		const b = await approve(loadProject(root), ['docs/claim.md']);
+		expect(b.approved).toBe(0);
 		expect(b.refused).toHaveLength(1);
 		expect(read(root, 'docs/claim.md')).toBe(before);
 	});
@@ -173,7 +173,7 @@ describe('broken refs and scan errors', () => {
 		expect(exitCode(report)).toBe(2);
 	});
 
-	it('a nested pin is a scan error: exit 2', async () => {
+	it('a nested claim is a scan error: exit 2', async () => {
 		const root = tmp();
 		write(
 			root,
@@ -217,7 +217,7 @@ describe('ls: the reverse index', () => {
 });
 
 describe('affected: mapping changes to carriers', () => {
-	it('lists carriers whose anchor overlaps the diff, and broken ones', async () => {
+	it('lists references whose anchor overlaps the diff, and broken ones', async () => {
 		const root = tmp();
 		initRepo(root);
 		write(
@@ -280,7 +280,7 @@ describe('anchors: the code-side inventory', () => {
 			'src/lib.ts#@spare'
 		]);
 		const pi = result.anchors.find((a) => a.name === 'pi-part')!;
-		expect(pi.references).toEqual([{ doc: 'docs/page.md', line: 6, carrier: 'fence' }]);
+		expect(pi.references).toEqual([{ doc: 'docs/page.md', line: 6, kind: 'snippet' }]);
 		expect(result.anchors.find((a) => a.name === 'spare')!.references).toEqual([]);
 	});
 
@@ -364,10 +364,10 @@ describe('cross-repo: lock, update, pinned resolution', () => {
 		expect(read(root, 'docref.lock')).toContain(tip);
 		expect(read(root, 'docs/x.md')).toContain('func Verify');
 
-		await bless(loadProject(root), ['docs/x.md']);
+		await approve(loadProject(root), ['docs/x.md']);
 		expect(exitCode(await check(loadProject(root)))).toBe(0);
 
-		// the remote moves on; pinned refs stay fresh until update
+		// the remote moves on; pinned refs stay up to date until update
 		write(remote, 'src/handler.go', 'package api\n\nfunc Verify(sig []byte) bool {\n\treturn true\n}\n');
 		commitAll(remote, 'v2');
 		expect(exitCode(await check(loadProject(root)))).toBe(0);

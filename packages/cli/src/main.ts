@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// docref CLI (tooling.md section 1). Exit codes: 0 everything fresh,
-// 1 stale carriers present, 2 broken carriers or config/usage errors.
+// docref CLI (tooling.md section 1). Exit codes: 0 everything up to
+// date, 1 stale references present, 2 broken references or usage errors.
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
@@ -8,7 +8,7 @@ import {
 	loadProject,
 	check,
 	refresh,
-	bless,
+	approve,
 	update,
 	affected,
 	ls,
@@ -21,12 +21,12 @@ import {
 const USAGE = `usage: docref <command> [options]
 
 commands:
-  check [paths...]            report carrier states; writes nothing
-  refresh [paths...]          rewrite stale snippet fences (mechanical)
-  bless <paths...>            advance pin shas after reviewing the prose
+  check [paths...]            report reference states; writes nothing
+  refresh [paths...]          rewrite stale snippets (mechanical)
+  approve <paths...>          record claim approvals after reviewing the prose
   update [aliases...]         pin cross-repo aliases to their branch tips
          --check              dry run: report drift, write nothing
-  affected --since <rev>      carriers endangered by changes since <rev>
+  affected --since <rev>      references endangered by changes since <rev>
   ls                          the reverse index: refs and their locations
   anchors                     region markers in the code, unused ones flagged
 
@@ -50,7 +50,7 @@ function popValue(args: string[], flag: string): string | undefined {
 
 function entryLine(e: ReportEntry): string {
 	const hashes =
-		e.pinned || e.current ? ` (${e.pinned ?? 'unblessed'} -> ${e.current ?? '?'})` : '';
+		e.pinned || e.current ? ` (${e.pinned ?? 'unapproved'} -> ${e.current ?? '?'})` : '';
 	const reason = e.reason ? ` ${e.reason}` : '';
 	return `${e.state}  ${e.doc}:${e.line}  ${e.ref}${hashes}${reason}`;
 }
@@ -59,11 +59,11 @@ function renderReport(report: Report, json: boolean): string {
 	if (json) return JSON.stringify(report, null, 2);
 	const lines = [
 		...report.errors.map((e) => `error  ${e.doc}:${e.line}  ${e.message}`),
-		...report.entries.filter((e) => e.state !== 'fresh').map(entryLine)
+		...report.entries.filter((e) => e.state !== 'up-to-date').map(entryLine)
 	];
 	const s = report.summary;
 	lines.push(
-		`${s.fresh} fresh, ${s.staleSnippet} stale-snippet, ${s.staleClaim} stale-claim, ${s.broken} broken, ${report.errors.length} errors`
+		`${s.upToDate} up-to-date, ${s.staleSnippet} stale-snippet, ${s.staleClaim} stale-claim, ${s.broken} broken, ${report.errors.length} errors`
 	);
 	return lines.join('\n');
 }
@@ -89,13 +89,13 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 				const head = changedDocs.length ? changedDocs.map((d) => `refreshed  ${d}`).join('\n') + '\n' : '';
 				return { code: exitCode(report), out: head + renderReport(report, false) };
 			}
-			case 'bless': {
-				if (rest.length === 0) return usage('bless requires explicit paths');
-				const result = await bless(project(), rest);
+			case 'approve': {
+				if (rest.length === 0) return usage('approve requires explicit paths');
+				const result = await approve(project(), rest);
 				const code = result.refused.length > 0 ? 2 : 0;
 				if (json) return { code, out: JSON.stringify(result, null, 2) };
 				const lines = [
-					`blessed ${result.blessed} pin(s) in ${result.changedDocs.length} file(s)`,
+					`approved ${result.approved} claim(s) in ${result.changedDocs.length} file(s)`,
 					...result.refused.map((e) => `refused  ${e.doc}:${e.line}  ${e.ref}  ${e.reason ?? ''}`)
 				];
 				return { code, out: lines.join('\n') };
@@ -120,7 +120,7 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 					code: 0,
 					out:
 						result.entries.map((e) => `${e.reason}  ${e.doc}:${e.line}  ${e.ref}`).join('\n') ||
-						'no carriers affected'
+						'no references affected'
 				};
 			}
 			case 'anchors': {
@@ -145,7 +145,7 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 				return {
 					code: 0,
 					out: index.refs
-						.flatMap((r) => [r.ref, ...r.locations.map((l) => `  ${l.doc}:${l.line} (${l.carrier})`)])
+						.flatMap((r) => [r.ref, ...r.locations.map((l) => `  ${l.doc}:${l.line} (${l.kind})`)])
 						.join('\n')
 				};
 			}

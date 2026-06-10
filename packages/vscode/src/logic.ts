@@ -134,8 +134,8 @@ export function diagnosticsFromReport(report: Report): Map<string, DiagnosticDat
 		byDoc.set(doc, list);
 	};
 	for (const e of report.entries) {
-		if (e.state === 'fresh') continue;
-		const hashes = e.pinned || e.current ? ` (${e.pinned ?? 'unblessed'} -> ${e.current ?? '?'})` : '';
+		if (e.state === 'up-to-date') continue;
+		const hashes = e.pinned || e.current ? ` (${e.pinned ?? 'unapproved'} -> ${e.current ?? '?'})` : '';
 		push(e.doc, {
 			line: e.line,
 			severity: e.state === 'broken' ? 'error' : 'warning',
@@ -152,11 +152,11 @@ export function diagnosticsFromReport(report: Report): Map<string, DiagnosticDat
 export type RefNode = {
 	ref: string;
 	state: State | 'unknown';
-	locations: { doc: string; line: number; carrier: string; state: State | 'unknown' }[];
+	locations: { doc: string; line: number; kind: string; state: State | 'unknown' }[];
 };
 
 const SEVERITY: Record<State | 'unknown', number> = {
-	fresh: 0,
+	'up-to-date': 0,
 	unknown: 1,
 	'stale-snippet': 2,
 	'stale-claim': 3,
@@ -173,7 +173,7 @@ export function buildRefTree(index: RefIndex, report: Report | null): RefNode[] 
 		}));
 		const state = locations.reduce<State | 'unknown'>(
 			(worst, l) => (SEVERITY[l.state] > SEVERITY[worst] ? l.state : worst),
-			report ? 'fresh' : 'unknown'
+			report ? 'up-to-date' : 'unknown'
 		);
 		return { ref: r.ref, state: report ? state : 'unknown', locations };
 	});
@@ -187,7 +187,7 @@ export type AnchorTreeNode =
 			file: string;
 			line: number;
 			used: boolean;
-			references: { doc: string; line: number; carrier: string }[];
+			references: { doc: string; line: number; kind: string }[];
 	  }
 	| { kind: 'error'; label: string; description: string; file: string; line: number };
 
@@ -223,5 +223,5 @@ export function statusText(report: Report | null): string {
 	const broken = s.broken + report.errors.length;
 	if (broken > 0) return `docref $(error) ${s.broken} broken${stale ? `, ${stale} stale` : ''}`;
 	if (stale > 0) return `docref $(warning) ${stale} stale`;
-	return `docref $(check) ${s.fresh}`;
+	return `docref $(check) ${s.upToDate}`;
 }

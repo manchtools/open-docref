@@ -1,13 +1,13 @@
-// Markdown carriers (format.md sections 3 and 4): snippet fences carry
-// docref attributes in the info string; pin blocks are comment pairs. The
-// scanner is fence-aware so example fences inside longer fences and pin
-// syntax inside code blocks are content, never carriers. Malformed
-// carriers are hard errors.
+// Markdown references (format.md sections 3 and 4): snippets carry
+// docref attributes in the fence info string; claims are comment pairs. The
+// scanner is fence-aware so example fences inside longer fences and claim
+// syntax inside code blocks are content, never references. Malformed
+// references are hard errors.
 import { parseRef } from './ref';
 import { DocrefError } from './errors';
 
-export type FenceCarrier = {
-	kind: 'fence';
+export type Snippet = {
+	kind: 'snippet';
 	openLine: number; // 1-based, inclusive
 	closeLine: number;
 	indent: string;
@@ -20,8 +20,8 @@ export type FenceCarrier = {
 	body: string;
 };
 
-export type PinCarrier = {
-	kind: 'pin';
+export type Claim = {
+	kind: 'claim';
 	openLine: number;
 	closeLine: number;
 	indent: string;
@@ -30,12 +30,12 @@ export type PinCarrier = {
 	sha?: string;
 };
 
-export type Carrier = FenceCarrier | PinCarrier;
+export type Reference = Snippet | Claim;
 export type ScanError = { line: number; code: string; message: string };
 
 const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
-const PIN_BEGIN = /^(\s*)<!--\s*docref:\s*begin\s+(.+?)\s*-->\s*$/;
-const PIN_END = /^\s*<!--\s*docref:\s*end\s*-->\s*$/;
+const CLAIM_BEGIN = /^(\s*)<!--\s*docref:\s*begin\s+(.+?)\s*-->\s*$/;
+const CLAIM_END = /^\s*<!--\s*docref:\s*end\s*-->\s*$/;
 const SHA = /^[0-9a-f]{8,64}$/i;
 
 type Attrs = { ref?: string; sha?: string };
@@ -57,7 +57,7 @@ function readAttrs(
 			try {
 				parseRef(value);
 			} catch (e) {
-				errors.push({ line, code: 'malformed-carrier', message: (e as Error).message });
+				errors.push({ line, code: 'malformed-reference', message: (e as Error).message });
 				return null;
 			}
 			attrs.ref = value;
@@ -65,7 +65,7 @@ function readAttrs(
 			if (!SHA.test(value)) {
 				errors.push({
 					line,
-					code: 'malformed-carrier',
+					code: 'malformed-reference',
 					message: `sha "${value}" is not 8-64 hex characters`
 				});
 				return null;
@@ -76,14 +76,14 @@ function readAttrs(
 	return attrs;
 }
 
-export function scanMarkdown(text: string): { carriers: Carrier[]; errors: ScanError[] } {
-	const carriers: Carrier[] = [];
+export function scanMarkdown(text: string): { references: Reference[]; errors: ScanError[] } {
+	const references: Reference[] = [];
 	const errors: ScanError[] = [];
 	const lines = text.split('\n');
 
 	let fence: { char: string; len: number } | null = null;
-	let pending: (Omit<FenceCarrier, 'body' | 'closeLine'> & { bodyStart: number }) | null = null;
-	let pin: (Omit<PinCarrier, 'closeLine'> & { hasSha: boolean }) | null = null;
+	let pending: (Omit<Snippet, 'body' | 'closeLine'> & { bodyStart: number }) | null = null;
+	let claim: (Omit<Claim, 'closeLine'> & { hasSha: boolean }) | null = null;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i]!;
@@ -93,7 +93,7 @@ export function scanMarkdown(text: string): { carriers: Carrier[]; errors: ScanE
 			if (close.test(line)) {
 				if (pending) {
 					const { bodyStart, ...rest } = pending;
-					carriers.push({ ...rest, body: lines.slice(bodyStart, i).join('\n'), closeLine: i + 1 });
+					references.push({ ...rest, body: lines.slice(bodyStart, i).join('\n'), closeLine: i + 1 });
 					pending = null;
 				}
 				fence = null;
@@ -114,7 +114,7 @@ export function scanMarkdown(text: string): { carriers: Carrier[]; errors: ScanE
 			const attrs = readAttrs(tokens, 'docref', i + 1, errors);
 			if (!attrs || !attrs.ref) continue; // error already recorded or not ours
 			pending = {
-				kind: 'fence',
+				kind: 'snippet',
 				openLine: i + 1,
 				indent,
 				fenceChar: fence.char,
@@ -128,47 +128,47 @@ export function scanMarkdown(text: string): { carriers: Carrier[]; errors: ScanE
 			continue;
 		}
 
-		if (PIN_END.test(line)) {
-			if (pin) {
-				const { hasSha, ...rest } = pin;
+		if (CLAIM_END.test(line)) {
+			if (claim) {
+				const { hasSha, ...rest } = claim;
 				void hasSha;
-				carriers.push({ ...rest, closeLine: i + 1 });
-				pin = null;
+				references.push({ ...rest, closeLine: i + 1 });
+				claim = null;
 			} else {
-				errors.push({ line: i + 1, code: 'unmatched-pin-end', message: 'pin end without a begin' });
+				errors.push({ line: i + 1, code: 'unmatched-claim-end', message: 'claim end without a begin' });
 			}
 			continue;
 		}
 
-		const begin = PIN_BEGIN.exec(line);
+		const begin = CLAIM_BEGIN.exec(line);
 		if (begin) {
 			const [, indent, argsRaw] = begin as unknown as [string, string, string];
 			const tokens = argsRaw.split(/\s+/).filter(Boolean);
 			const withEq = tokens.filter((t) => t.includes('='));
 			if (withEq.length === 0) {
-				// name form: a region marker in a markdown source file, not a pin
+				// name form: a region marker in a markdown source file, not a claim
 				continue;
 			}
 			if (withEq.length !== tokens.length) {
 				errors.push({
 					line: i + 1,
-					code: 'malformed-carrier',
-					message: 'pin arguments mix names and key=value attributes'
+					code: 'malformed-reference',
+					message: 'claim arguments mix names and key=value attributes'
 				});
 				continue;
 			}
-			if (pin) {
-				errors.push({ line: i + 1, code: 'nested-pin', message: 'pin blocks do not nest' });
+			if (claim) {
+				errors.push({ line: i + 1, code: 'nested-claim', message: 'claim blocks do not nest' });
 				continue;
 			}
 			const attrs = readAttrs(tokens, 'src', i + 1, errors);
 			if (!attrs) continue;
 			if (!attrs.ref) {
-				errors.push({ line: i + 1, code: 'malformed-carrier', message: 'pin is missing src=' });
+				errors.push({ line: i + 1, code: 'malformed-reference', message: 'claim is missing src=' });
 				continue;
 			}
-			pin = {
-				kind: 'pin',
+			claim = {
+				kind: 'claim',
 				openLine: i + 1,
 				indent,
 				tokens,
@@ -182,19 +182,19 @@ export function scanMarkdown(text: string): { carriers: Carrier[]; errors: ScanE
 	if (pending) {
 		errors.push({
 			line: pending.openLine,
-			code: 'unclosed-fence',
-			message: `fence carrier for ${pending.ref} is never closed`
+			code: 'unclosed-snippet',
+			message: `snippet for ${pending.ref} is never closed`
 		});
 	}
-	if (pin) {
+	if (claim) {
 		errors.push({
-			line: pin.openLine,
-			code: 'unclosed-pin',
-			message: `pin for ${pin.ref} is never closed`
+			line: claim.openLine,
+			code: 'unclosed-claim',
+			message: `claim for ${claim.ref} is never closed`
 		});
 	}
 
-	return { carriers, errors };
+	return { references, errors };
 }
 
 /** Place or update the sha token, keeping every other token in order. */
@@ -210,14 +210,14 @@ function withSha(tokens: string[], anchorKey: string, sha: string): string[] {
 	return out;
 }
 
-export type FenceEdit = { carrier: FenceCarrier; body: string; sha: string };
+export type SnippetEdit = { carrier: Snippet; body: string; sha: string };
 
 /**
- * Rewrite fence carriers in place: new body, sha placed after docref=. The
+ * Rewrite snippets in place: new body, sha placed after docref=. The
  * fence is lengthened when the body itself contains fence-like runs, so the
  * result always round-trips through scanMarkdown.
  */
-export function rewriteFences(text: string, edits: FenceEdit[]): string {
+export function rewriteSnippets(text: string, edits: SnippetEdit[]): string {
 	const lines = text.split('\n');
 	const sorted = [...edits].sort((a, b) => b.carrier.openLine - a.carrier.openLine);
 	for (const { carrier: c, body, sha } of sorted) {
@@ -237,10 +237,10 @@ export function rewriteFences(text: string, edits: FenceEdit[]): string {
 	return lines.join('\n');
 }
 
-export type PinEdit = { carrier: PinCarrier; sha: string };
+export type ClaimEdit = { carrier: Claim; sha: string };
 
-/** Advance pin shas (the blessing). Only the begin line is touched. */
-export function blessPins(text: string, edits: PinEdit[]): string {
+/** Advance claim shas (the approval). Only the begin line is touched. */
+export function approveClaims(text: string, edits: ClaimEdit[]): string {
 	const lines = text.split('\n');
 	for (const { carrier: c, sha } of edits) {
 		const tokens = withSha(c.tokens, 'src', sha);

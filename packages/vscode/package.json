@@ -30,8 +30,8 @@
 				"icon": "$(sync)"
 			},
 			{
-				"command": "docref.blessDocument",
-				"title": "Docref: Bless Pins in Current Document"
+				"command": "docref.approveClaims",
+				"title": "Docref: Approve Claims in Current Document"
 			}
 		],
 		"menus": {
@@ -42,7 +42,7 @@
 					"group": "docref"
 				},
 				{
-					"command": "docref.blessDocument",
+					"command": "docref.approveClaims",
 					"when": "resourceExtname == .md",
 					"group": "docref"
 				}

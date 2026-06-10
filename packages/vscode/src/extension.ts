@@ -9,7 +9,7 @@ import {
 	loadProject,
 	check,
 	refresh,
-	bless,
+	approve,
 	ls,
 	anchors,
 	listDeclarations,
@@ -54,7 +54,7 @@ function relPath(uri: vscode.Uri, root: string): string {
 }
 
 const STATE_ICONS: Record<string, vscode.ThemeIcon> = {
-	fresh: new vscode.ThemeIcon('check'),
+	'up-to-date': new vscode.ThemeIcon('check'),
 	'stale-snippet': new vscode.ThemeIcon('warning'),
 	'stale-claim': new vscode.ThemeIcon('warning'),
 	broken: new vscode.ThemeIcon('error'),
@@ -77,8 +77,8 @@ class RefTree implements vscode.TreeDataProvider<RefNode | RefNode['locations'][
 			return item;
 		}
 		const item = new vscode.TreeItem(`${el.doc}:${el.line}`, vscode.TreeItemCollapsibleState.None);
-		item.iconPath = new vscode.ThemeIcon(el.carrier === 'pin' ? 'note' : 'code');
-		item.description = `${el.carrier}${el.state === 'unknown' ? '' : ` (${el.state})`}`;
+		item.iconPath = new vscode.ThemeIcon(el.kind === 'claim' ? 'note' : 'code');
+		item.description = `${el.kind}${el.state === 'unknown' ? '' : ` (${el.state})`}`;
 		item.command = {
 			command: 'docref.openLocation',
 			title: 'Open',
@@ -95,7 +95,7 @@ class RefTree implements vscode.TreeDataProvider<RefNode | RefNode['locations'][
 	}
 }
 
-class AnchorTree implements vscode.TreeDataProvider<AnchorTreeNode | { doc: string; line: number; carrier: string }> {
+class AnchorTree implements vscode.TreeDataProvider<AnchorTreeNode | { doc: string; line: number; kind: string }> {
 	private emitter = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this.emitter.event;
 
@@ -103,10 +103,11 @@ class AnchorTree implements vscode.TreeDataProvider<AnchorTreeNode | { doc: stri
 		this.emitter.fire();
 	}
 
-	getTreeItem(el: AnchorTreeNode | { doc: string; line: number; carrier: string }): vscode.TreeItem {
-		if (!('kind' in el)) {
+	getTreeItem(el: AnchorTreeNode | { doc: string; line: number; kind: string }): vscode.TreeItem {
+		// locations carry `doc`; tree nodes carry `file`
+		if ('doc' in el) {
 			const item = new vscode.TreeItem(`${el.doc}:${el.line}`, vscode.TreeItemCollapsibleState.None);
-			item.iconPath = new vscode.ThemeIcon(el.carrier === 'pin' ? 'note' : 'code');
+			item.iconPath = new vscode.ThemeIcon(el.kind === 'claim' ? 'note' : 'code');
 			item.command = { command: 'docref.openLocation', title: 'Open', arguments: [el.doc, el.line] };
 			return item;
 		}
@@ -128,10 +129,10 @@ class AnchorTree implements vscode.TreeDataProvider<AnchorTreeNode | { doc: stri
 	}
 
 	getChildren(
-		el?: AnchorTreeNode | { doc: string; line: number; carrier: string }
-	): (AnchorTreeNode | { doc: string; line: number; carrier: string })[] {
+		el?: AnchorTreeNode | { doc: string; line: number; kind: string }
+	): (AnchorTreeNode | { doc: string; line: number; kind: string })[] {
 		if (!el) return anchorIndex ? buildAnchorTree(anchorIndex) : [];
-		return el && 'kind' in el && el.kind === 'anchor' ? el.references : [];
+		return !('doc' in el) && el.kind === 'anchor' ? el.references : [];
 	}
 }
 
@@ -262,11 +263,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		const action = await vscode.window.showInformationMessage(
 			`docref: ${ref} copied`,
 			'Copy fence',
-			'Copy pin block'
+			'Copy claim'
 		);
 		if (action === 'Copy fence') {
 			await vscode.env.clipboard.writeText('```' + lang + ` docref=${ref}\n` + '```');
-		} else if (action === 'Copy pin block') {
+		} else if (action === 'Copy claim') {
 			await vscode.env.clipboard.writeText(
 				`<!-- docref: begin src=${ref} -->\n\n<!-- docref: end -->`
 			);
@@ -330,21 +331,21 @@ export function activate(context: vscode.ExtensionContext): void {
 			);
 			await rescan();
 		}),
-		vscode.commands.registerCommand('docref.blessDocument', async () => {
+		vscode.commands.registerCommand('docref.approveClaims', async () => {
 			const p = project();
 			const editor = vscode.window.activeTextEditor;
 			const root = workspaceRoot();
 			if (!p || !editor || !root) return;
 			const rel = relPath(editor.document.uri, root).split('\\').join('/');
 			const confirmed = await vscode.window.showWarningMessage(
-				`Bless all pins in ${rel}? Only do this after reading the pinned prose against the current code.`,
+				`Approve all claims in ${rel}? Only do this after reading the claimed prose against the current code.`,
 				{ modal: true },
-				'Bless'
+				'Approve'
 			);
-			if (confirmed !== 'Bless') return;
-			const result = await bless(p, [rel]);
+			if (confirmed !== 'Approve') return;
+			const result = await approve(p, [rel]);
 			void vscode.window.showInformationMessage(
-				`docref: blessed ${result.blessed} pin(s)` +
+				`docref: approved ${result.approved} claim(s)` +
 					(result.refused.length ? `, refused ${result.refused.length} broken` : '')
 			);
 			await rescan();
@@ -359,9 +360,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand(
 			'docref.showLocations',
-			async (locations: { doc: string; line: number; carrier: string }[]) => {
+			async (locations: { doc: string; line: number; kind: string }[]) => {
 				const picked = await vscode.window.showQuickPick(
-					locations.map((l) => ({ label: `${l.doc}:${l.line}`, description: l.carrier, l })),
+					locations.map((l) => ({ label: `${l.doc}:${l.line}`, description: l.kind, l })),
 					{ title: 'docref: referencing locations' }
 				);
 				if (picked) await vscode.commands.executeCommand('docref.openLocation', picked.l.doc, picked.l.line);

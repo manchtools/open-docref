@@ -14,11 +14,13 @@ is specified in [tooling.md](tooling.md).
   marker comments) or a *whole file*.
 - **Reference (ref)**: a locator string naming an anchor, optionally in
   another repository.
-- **Carrier**: the markdown construct holding a ref. Either a *snippet
-  fence* (code block with materialized contents) or a *pin block*
-  (a comment-delimited span of prose).
-- **Blessing**: recording the hash of the anchored content at the
-  moment a human or agent confirmed the carrier's contents are true.
+- **Snippet**: a fenced code block whose contents the tool keeps in
+  sync with the anchored code.
+- **Claim**: a comment-delimited span of prose asserting something
+  about anchored code; it needs a human re-approval when that code
+  changes.
+- **Approval**: recording the hash of the anchored content at the
+  moment a human or agent confirmed the prose is still true.
 
 ## 1. References
 
@@ -108,10 +110,10 @@ Symbols need no marker and are the default. Markers are for sub-symbol
 slices (five specific lines inside a function) or for languages and
 file types where structural resolution is unavailable.
 
-## 3. Snippet fences (in markdown)
+## 3. Snippets (in markdown)
 
-A snippet fence is an ordinary fenced code block whose info string
-carries docref attributes:
+A snippet is an ordinary fenced code block whose info string carries
+docref attributes:
 
 ````markdown
 ```go docref=open-secret:src/api/handler.go#VerifySignature sha=9c2f1ab3
@@ -124,7 +126,7 @@ func (s *Server) VerifySignature(req *Request) error {
 - The info string is: language word first (CommonMark convention, so
   syntax highlighting works everywhere), then space-separated
   `key=value` attributes in any order. Unknown keys are preserved.
-- `docref=` is required. `sha=` is written by the tool; a fence without
+- `docref=` is required. `sha=` is written by the tool; a snippet without
   it is treated as never-refreshed and is stale by definition.
 - The body is **materialized**: the tool writes the extracted anchor
   contents into the fence and commits them. Readers and renderers see
@@ -136,14 +138,14 @@ func (s *Server) VerifySignature(req *Request) error {
 - The body is owned by the tool. Hand edits are detected (the body no
   longer hashes to `sha=`) and overwritten by the next refresh.
 
-A fence is *fresh* when the anchor's current hash, the `sha=`
-attribute, and the hash of the fence body all agree. Any disagreement
-makes it *stale-snippet*; see section 5.
+A snippet is *up-to-date* when the anchor's current hash, the `sha=`
+attribute, and the hash of the body all agree. Any disagreement makes
+it *stale-snippet*; see section 5.
 
-## 4. Pin blocks (in markdown)
+## 4. Claims (in markdown)
 
-A pin block ties a span of prose to an anchor. It claims "this text was
-verified against that code":
+A claim ties a span of prose to an anchor: "this text was verified
+against that code".
 
 ```markdown
 <!-- docref: begin src=open-secret:src/api/handler.go#VerifySignature sha=9c2f1ab3 -->
@@ -152,31 +154,31 @@ exact field set, including the target id.
 <!-- docref: end -->
 ```
 
-- Carrier comments use the same `docref: begin` / `docref: end` grammar
+- Claim comments use the same `docref: begin` / `docref: end` grammar
   as region markers. The argument forms differ: a code region takes a
-  bare *name*; a pin takes `key=value` *attributes*. A token containing
+  bare *name*; a claim takes `key=value` *attributes*. A token containing
   `=` is an attribute; otherwise it is a name.
 - `src=` is required. `sha=` is the hash of the **referenced code
-  region** (not of the prose) recorded at blessing time. A pin without
-  `sha=` is unblessed and reported as *stale-claim* until first
-  blessed.
-- Pin blocks do not nest. `end` is bare.
+  region** (not of the prose) recorded at approval time. A claim
+  without `sha=` is unapproved and reported as *stale-claim* until
+  first approved.
+- Claims do not nest. `end` is bare.
 - The body is arbitrary markdown and belongs to the author. The tool
   never rewrites it.
-- A snippet fence inside a pin block is an independent carrier: its
-  body still refreshes mechanically. Only the pin's `sha=` requires a
-  blessing. This is how a doc shows the current code *and* keeps a
-  reviewed claim about it.
+- A snippet inside a claim is independent: its body still refreshes
+  mechanically. Only the claim's `sha=` requires an approval. This is
+  how a doc shows the current code *and* keeps a reviewed claim about
+  it.
 
-HTML comments were chosen as the carrier deliberately: they are
+HTML comments carry claims deliberately: they are
 invisible on GitHub and in markdown previews, they survive Prettier,
 and renderers that strip comments lose nothing visible.
 
 ### Collection files
 
-A collection (research scratchpad) is just a markdown file made of pin
-blocks whose bodies are working notes, optionally with materialized
-fences inside. Collections are scanned and drift-checked like any other
+A collection (research scratchpad) is just a markdown file made of
+claims whose bodies are working notes, optionally with materialized
+snippets inside. Collections are scanned and drift-checked like any other
 markdown file, and folding research into real docs is cut-and-paste of
 blocks. No separate format exists.
 
@@ -192,7 +194,7 @@ hash = lowercase hex sha256( utf8( strip-whitespace( content ) ) )
   token changes do.
 - `content` is the anchored code: the symbol's full declaration span,
   the region between (excluding) its marker lines, or the whole file.
-- Carriers store the first **8 hex characters**. Longer prefixes are
+- References store the first **8 hex characters**. Longer prefixes are
   accepted when comparing. A collision does not corrupt anything; at
   worst it delays one review prompt.
 
@@ -245,19 +247,19 @@ rev = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   rev. Git is invoked as the system `git`, so existing credentials
   (SSH keys, credential helpers) cover private repositories with no
   extra configuration.
-- Because fence bodies are materialized, **serving or rendering the
+- Because snippet bodies are materialized, **serving or rendering the
   docs never requires access to the referenced repositories**. Only
   `check`, `refresh`, and `update` do.
 
 ## 7. States
 
-Every carrier is in exactly one state:
+Every snippet and claim is in exactly one state:
 
 | State | Meaning | Resolution |
 |---|---|---|
-| `fresh` | anchor resolves, all hashes agree | nothing to do |
-| `stale-snippet` | a fence whose anchor resolves but whose `sha=` or body disagrees with the anchor | mechanical: `docref refresh` |
-| `stale-claim` | a pin whose anchor resolves but whose `sha=` disagrees (or is absent) | judgment: read the prose, fix it if needed, `docref bless` |
+| `up-to-date` | anchor resolves, all hashes agree | nothing to do |
+| `stale-snippet` | a snippet whose anchor resolves but whose `sha=` or body disagrees with the anchor | mechanical: `docref refresh` |
+| `stale-claim` | a claim whose anchor resolves but whose `sha=` disagrees (or is absent) | judgment: read the prose, fix it if needed, `docref approve` |
 | `broken` | the anchor does not resolve: missing file, unknown symbol, ambiguous symbol, missing region, undeclared alias | author intervention; never auto-fixed |
 
 The defining rule of the whole system: **the tool may move anything in
@@ -274,15 +276,15 @@ All of the following are hard errors, not warnings:
 - duplicate region names in one file; unmatched `begin`/`end`
 - an alias not declared in `docref.toml`; an alias declared but absent
   from `docref.lock`
-- a nested pin block
-- a malformed carrier (unparseable attributes, missing `docref=`/`src=`)
+- a nested claim
+- a malformed reference (unparseable attributes, missing `docref=`/`src=`)
 
 ## 9. Renderers (informative)
 
 Renderers need no docref support: fences are ordinary code blocks and
-pin comments are invisible. A renderer that opts in may, for example,
+claim comments are invisible. A renderer that opts in may, for example,
 show a provenance caption on fences ("from `handler.go`", linking to
-the source at the locked rev), render a verified badge on pin blocks,
+the source at the locked rev), render a verified badge on claims,
 or resolve and display an anchor's current contents at build time by
 invoking the resolver. Such integrations are out of scope for the
 format and must not change document semantics for other renderers.

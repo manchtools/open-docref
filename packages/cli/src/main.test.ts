@@ -5,9 +5,9 @@ import { pathToFileURL } from 'node:url';
 import { run, isMainEntry } from './main';
 import { tmp, write, read } from '../../core/src/testutil';
 
-// CLI contract (tooling.md section 1): exit 0 all fresh, 1 stale present,
-// 2 broken or config/usage error. --json emits the machine report. bless
-// demands explicit paths; affected demands --since.
+// CLI contract (tooling.md section 1): exit 0 all up to date, 1 stale
+// present, 2 broken or config/usage error. --json emits the machine
+// report. approve demands explicit paths; affected demands --since.
 
 let cacheDir: string;
 beforeAll(() => {
@@ -32,10 +32,10 @@ describe('docref CLI', () => {
 		const res = await run(['check', '--json'], root);
 		expect(res.code).toBe(0);
 		const parsed = JSON.parse(res.out);
-		expect(parsed.summary.fresh).toBe(1);
+		expect(parsed.summary.upToDate).toBe(1);
 	});
 
-	it('check exits 1 on stale carriers', async () => {
+	it('check exits 1 on stale references', async () => {
 		const root = project();
 		await run(['refresh'], root);
 		write(root, 'src/lib.ts', read(root, 'src/lib.ts').replace('"hi"', '"ho"'));
@@ -50,8 +50,8 @@ describe('docref CLI', () => {
 		expect(res.out).toContain('broken');
 	});
 
-	it('bless without paths is a usage error', async () => {
-		const res = await run(['bless'], project());
+	it('approve without paths is a usage error', async () => {
+		const res = await run(['approve'], project());
 		expect(res.code).toBe(2);
 	});
 

@@ -26,7 +26,7 @@ export function applyFootnotes(content: string): string {
 ```
 ````
 
-A paragraph pins a claim to code in another repository:
+A claim ties a paragraph to code in another repository:
 
 ```markdown
 <!-- docref: begin src=open-secret:src/api/handler.go#VerifySignature sha=9c2f1ab3 -->
@@ -36,19 +36,19 @@ exact field set, including the target id.
 ```
 
 When `VerifySignature` changes, the snippet refreshes mechanically and
-the pinned paragraph is flagged for review until a reader confirms the
-prose is still true.
+the claim is flagged for review until a reader confirms the prose is
+still true and approves it.
 
 ## Design principles
 
-1. **Plain text first.** Every artifact (references, markers, pins,
+1. **Plain text first.** Every artifact (references, markers, claims,
    config, lockfile) is readable and editable without the tool, and
    documents degrade to ordinary markdown everywhere.
 2. **Fail closed.** A reference that does not resolve is an error, not
    a warning. Ambiguity is an error. Silence is never an option.
 3. **Mechanical work is automated, judgment never is.** Snippet bodies
-   refresh automatically. A pinned claim is only re-blessed by a reader
-   who looked at the prose.
+   refresh automatically. A claim is only re-approved by a reader who
+   looked at the prose.
 4. **Usable without AI, useful for AI.** One CLI contract serves
    humans, editors, CI, and agents alike. Agents get JSON; humans get
    the same answers in the editor.
@@ -60,7 +60,8 @@ prose is still true.
 The core library, the CLI, and a first cut of the VSCode extension are
 implemented and tested (milestones 1 through 5 of the plan): same-repo
 and cross-repo resolution, symbols (TypeScript, JavaScript, Go, Python)
-and regions, `check`, `refresh`, `bless`, `update`, `affected`, `ls`,
+and regions, `check`, `refresh`, `approve`, `update`, `affected`,
+`ls`, `anchors`,
 and in the editor: create-anchor from a selection, the references
 sidebar with live states, drift diagnostics, referenced-by CodeLens,
 and a status-bar counter.

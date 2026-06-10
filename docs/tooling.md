@@ -14,50 +14,51 @@ holds the markdown.
 ### `docref check [paths...]`
 
 Scan the markdown (per `[scan]` config, or the given paths), resolve
-every carrier, and report its state. Writes nothing.
+every snippet and claim, and report its state. Writes nothing.
 
-- Exit `0`: everything `fresh`.
+- Exit `0`: everything `up-to-date`.
 - Exit `1`: at least one `stale-snippet` or `stale-claim`.
-- Exit `2`: at least one `broken` carrier or a configuration error.
+- Exit `2`: at least one `broken` reference or a configuration error.
 
 `--json` emits the report machine-readably:
 
 ```json
 {
-  "carriers": [
+  "entries": [
     {
       "doc": "docs/security.md",
       "line": 41,
-      "carrier": "pin",
+      "kind": "claim",
       "ref": "open-secret:src/api/handler.go#VerifySignature",
       "state": "stale-claim",
       "pinned": "9c2f1ab3",
       "current": "4fa2b1c9"
     }
   ],
-  "summary": { "fresh": 12, "staleSnippet": 1, "staleClaim": 1, "broken": 0 }
+  "summary": { "upToDate": 12, "staleSnippet": 1, "staleClaim": 1, "broken": 0 }
 }
 ```
 
 ### `docref refresh [paths...]`
 
-Re-extract every snippet fence in scope and rewrite body and `sha=`.
-Touches only fences (the mechanical state); never advances a pin's
-`sha=`. Idempotent. Exit codes as in `check`, evaluated after the
+Re-extract every snippet in scope and rewrite body and `sha=`.
+Touches only snippets (the mechanical state); never advances a
+claim's `sha=`. Idempotent. Exit codes as in `check`, evaluated after the
 rewrite, so a repo whose only problems were stale snippets exits `0`.
 
-### `docref bless <paths...>`
+### `docref approve <paths...>`
 
-Advance the `sha=` of pin blocks in the given files to the anchors'
+Advance the `sha=` of claims in the given files to the anchors'
 current hashes. This is the judgment step: it must follow a human or
-agent actually reading the prose. It therefore requires explicit paths;
-there is no `--all`. Refuses to bless a pin whose anchor is `broken`.
+agent actually reading the prose. It therefore requires explicit
+paths; there is no `--all`. Refuses to approve a claim whose anchor is
+`broken`.
 
 ### `docref update [alias...] [--check]`
 
 For each alias (default: all): fetch the tracked branch, advance
-`docref.lock` to its tip, refresh all fences referencing the alias, and
-report every pin that became `stale-claim` under the new rev.
+`docref.lock` to its tip, refresh all snippets referencing the alias, and
+report every claim that became `stale-claim` under the new rev.
 
 `--check` is the dry run: fetch and compare, report what would change,
 write nothing. Exit codes as in `check` against the *new* rev, which
@@ -67,8 +68,8 @@ makes it the right job for scheduled CI (section 2).
 
 Map a change to the documents it endangers: diff the working tree (or
 `HEAD`) against `<rev>`, intersect changed line spans with anchor spans
-(symbols, regions, whole files), and list every carrier referencing an
-affected anchor. This is the primary agent entry point and the
+(symbols, regions, whole files), and list every snippet and claim
+referencing an affected anchor. This is the primary agent entry point and the
 pre-push answer to "which docs do I owe an update?".
 
 Same-repo only in v1: a code repository does not know which other
@@ -79,18 +80,17 @@ of scope.
 
 ### `docref ls [--json]`
 
-Dump the reverse index: every referenced anchor and every carrier
+Dump the reverse index: every referenced anchor and everything
 referencing it. The extension's CodeLens and the agent's orientation
 pass both read this.
 
 ### `docref anchors [--json]`
 
 The code-side inventory, the reverse of `ls`: scan the source tree for
-every declared region marker and list each with the carriers that
-reference it; an anchor with none is flagged **not used**. Marker
+every declared region marker and list each with the references to it;
+an anchor with none is flagged **not used**. Marker
 errors (duplicate names, unmatched begin/end) surface here even in
-files that no carrier references, which `check` alone would never
-visit. Exit `2` on marker errors, `0` otherwise (an unused anchor is
+files nothing references, which `check` alone would never visit. Exit `2` on marker errors, `0` otherwise (an unused anchor is
 information, not a failure).
 
 Files are enumerated from the `[anchors]` include/exclude globs in
@@ -107,7 +107,7 @@ implicitly an anchor, so "unused" carries no signal for them.
 - **Gate (every push/PR):** `docref check`. Blocks merging docs whose
   refs are broken, and code changes that strand same-repo refs.
 - **Mechanical sync (pre-commit or bot):** `docref refresh` keeps
-  fence bodies current; as a scheduled bot it opens a PR whose diff is
+  snippet bodies current; as a scheduled bot it opens a PR whose diff is
   itself the review surface.
 - **Cross-repo watch (scheduled):** `docref update --check` nightly in
   the docs repository. The morning after a referenced repository
@@ -125,22 +125,23 @@ so the editor and CI can never disagree about what counts as stale.
 - **Reverse-index CodeLens:** above any anchored symbol or region,
   "Referenced by N docs". Editing anchored code is the moment the
   author still has context; the lens puts the doc debt in view exactly
-  then. Click peeks the referencing carriers.
-- **Markdown diagnostics:** stale and broken carriers get squiggles
-  with the state and both hashes. Quick fixes: *Refresh fence*
-  (mechanical), *Bless pin* (offered only alongside a diff view of the
-  anchored code between pinned and current), *Open source at anchor*.
+  then. Click peeks the referencing locations.
+- **Markdown diagnostics:** stale and broken references get squiggles
+  with the state and both hashes. Quick fixes: *Refresh snippet*
+  (mechanical), *Approve claim* (offered only alongside a diff view of
+  the anchored code between approved and current), *Open source at
+  anchor*.
 - **Create anchor:** select code, run "docref: create anchor". Inserts
   a marker pair (name prompted, comment leader auto-detected) or, when
   the selection is exactly a declaration, copies the symbol ref with no
   marker inserted.
-- **Collection sidebar:** pin the current selection into a chosen
-  collection file as a pin block with an empty note; reorder and
+- **Collection sidebar:** add the current selection to a chosen
+  collection file as a claim with an empty note; reorder and
   annotate; "fold into document" moves blocks into a target markdown
   file. All of it is plain-text editing of the collection file, so the
   sidebar is optional, and agents or humans can edit the same file
   directly.
-- **Status bar:** repo-wide count of stale/broken carriers, updated on
+- **Status bar:** repo-wide count of stale/broken references, updated on
   save of any anchored file (re-resolving only refs into the saved
   file keeps this instant).
 
@@ -156,16 +157,16 @@ instructions file:
 This repository anchors documentation to code with docref.
 After changing code, run `docref affected --since <merge-base> --json`.
 For each affected document:
-- snippet fences: run `docref refresh <doc>`
-- pin blocks: read the pinned prose, update it if your change made it
-  untrue, then run `docref bless <doc>`
-Never bless a pin without reading its prose. `docref check` must exit
-0 before you are done.
+- snippets: run `docref refresh <doc>`
+- claims: read the prose, update it if your change made it untrue,
+  then run `docref approve <doc>`
+Never approve a claim without reading its prose. `docref check` must
+exit 0 before you are done.
 ```
 
 The split from the format spec carries over directly: an agent may
-always run `refresh`, and must treat `bless` as the output of a review
-it actually performed. `affected --json` gives it a precise work list
+always run `refresh`, and must treat `approve` as the output of a
+review it actually performed. `affected --json` gives it a precise work list
 instead of guessing which pages mention the changed code.
 
 ## 5. Implementation plan

@@ -1,7 +1,7 @@
 // The operations (tooling.md section 1). The defining rule from format.md
-// section 7 runs through everything here: the tool moves carriers in and
+// section 7 runs through everything here: the tool moves references in and
 // out of stale-snippet on its own (refresh), and never moves anything out
-// of stale-claim (bless is explicit) or broken (author intervention).
+// of stale-claim (approve is explicit) or broken (author intervention).
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,22 +13,22 @@ import { contentHash, hashesMatch } from './hash';
 import { parseRef } from './ref';
 import {
 	scanMarkdown,
-	rewriteFences,
-	blessPins,
-	type FenceCarrier,
-	type PinCarrier,
-	type FenceEdit
+	rewriteSnippets,
+	approveClaims,
+	type Snippet,
+	type Claim,
+	type SnippetEdit
 } from './markdown';
 import { workingTreeSource, resolveAnchor, type Anchor, type FileSource } from './resolve';
 import { branchTip, gitRevSource } from './gitcache';
 import { scanRegions } from './regions';
 
-export type State = 'fresh' | 'stale-snippet' | 'stale-claim' | 'broken';
+export type State = 'up-to-date' | 'stale-snippet' | 'stale-claim' | 'broken';
 
 export type ReportEntry = {
 	doc: string;
 	line: number;
-	carrier: 'fence' | 'pin';
+	kind: 'snippet' | 'claim';
 	ref: string;
 	state: State;
 	pinned?: string;
@@ -41,7 +41,7 @@ export type ReportError = { doc: string; line: number; code: string; message: st
 export type Report = {
 	entries: ReportEntry[];
 	errors: ReportError[];
-	summary: { fresh: number; staleSnippet: number; staleClaim: number; broken: number };
+	summary: { upToDate: number; staleSnippet: number; staleClaim: number; broken: number };
 };
 
 export function exitCode(report: Report): 0 | 1 | 2 {
@@ -53,7 +53,7 @@ export function exitCode(report: Report): 0 | 1 | 2 {
 
 function summarize(entries: ReportEntry[]): Report['summary'] {
 	return {
-		fresh: entries.filter((e) => e.state === 'fresh').length,
+		upToDate: entries.filter((e) => e.state === 'up-to-date').length,
 		staleSnippet: entries.filter((e) => e.state === 'stale-snippet').length,
 		staleClaim: entries.filter((e) => e.state === 'stale-claim').length,
 		broken: entries.filter((e) => e.state === 'broken').length
@@ -102,8 +102,8 @@ function sourcePool(project: Project, overrides?: RevOverrides) {
 type DocEvaluation = {
 	entries: ReportEntry[];
 	errors: ReportError[];
-	fenceEdits: FenceEdit[];
-	pins: { carrier: PinCarrier; anchor: Anchor | null; reason?: string }[];
+	snippetEdits: SnippetEdit[];
+	claims: { carrier: Claim; anchor: Anchor | null; reason?: string }[];
 	text: string;
 };
 
@@ -112,17 +112,17 @@ async function evaluateDoc(
 	text: string,
 	sourceFor: (alias: string | undefined) => FileSource
 ): Promise<DocEvaluation> {
-	const { carriers, errors } = scanMarkdown(text);
+	const { references, errors } = scanMarkdown(text);
 	const out: DocEvaluation = {
 		entries: [],
 		errors: errors.map((e) => ({ doc, ...e })),
-		fenceEdits: [],
-		pins: [],
+		snippetEdits: [],
+		claims: [],
 		text
 	};
 
-	for (const c of carriers) {
-		const base = { doc, line: c.openLine, carrier: c.kind, ref: c.ref } as const;
+	for (const c of references) {
+		const base = { doc, line: c.openLine, kind: c.kind, ref: c.ref } as const;
 		let anchor: Anchor;
 		try {
 			const ref = parseRef(c.ref);
@@ -130,27 +130,27 @@ async function evaluateDoc(
 		} catch (e) {
 			const reason = (e as Error).message;
 			out.entries.push({ ...base, state: 'broken', ...(c.sha ? { pinned: c.sha } : {}), reason });
-			if (c.kind === 'pin') out.pins.push({ carrier: c, anchor: null, reason });
+			if (c.kind === 'claim') out.claims.push({ carrier: c, anchor: null, reason });
 			continue;
 		}
 
 		const current = contentHash(anchor.content);
 		const cur8 = current.slice(0, 8);
-		if (c.kind === 'fence') {
-			const fresh = hashesMatch(c.sha, current) && contentHash(c.body) === current;
-			if (!fresh) out.fenceEdits.push({ carrier: c as FenceCarrier, body: anchor.content, sha: cur8 });
+		if (c.kind === 'snippet') {
+			const upToDate = hashesMatch(c.sha, current) && contentHash(c.body) === current;
+			if (!upToDate) out.snippetEdits.push({ carrier: c, body: anchor.content, sha: cur8 });
 			out.entries.push({
 				...base,
-				state: fresh ? 'fresh' : 'stale-snippet',
+				state: upToDate ? 'up-to-date' : 'stale-snippet',
 				...(c.sha ? { pinned: c.sha } : {}),
 				current: cur8
 			});
 		} else {
-			const fresh = hashesMatch(c.sha, current);
-			out.pins.push({ carrier: c, anchor });
+			const upToDate = hashesMatch(c.sha, current);
+			out.claims.push({ carrier: c, anchor });
 			out.entries.push({
 				...base,
-				state: fresh ? 'fresh' : 'stale-claim',
+				state: upToDate ? 'up-to-date' : 'stale-claim',
 				...(c.sha ? { pinned: c.sha } : {}),
 				current: cur8
 			});
@@ -180,14 +180,14 @@ function toReport(evaluations: Map<string, DocEvaluation>): Report {
 	return { entries, errors, summary: summarize(entries) };
 }
 
-/** Resolve and report every carrier. Writes nothing. */
+/** Resolve and report every reference. Writes nothing. */
 export async function check(project: Project, paths?: string[]): Promise<Report> {
 	return toReport(await evaluate(project, paths));
 }
 
 /**
- * The mechanical half: rewrite every stale fence to the anchor's current
- * content. Pins are never touched. Returns the post-refresh report.
+ * The mechanical half: rewrite every stale snippet to the anchor's current
+ * content. Claims are never touched. Returns the post-refresh report.
  */
 export async function refresh(
 	project: Project,
@@ -196,54 +196,54 @@ export async function refresh(
 	const evaluations = await evaluate(project, paths);
 	const changedDocs: string[] = [];
 	for (const [doc, ev] of evaluations) {
-		if (ev.fenceEdits.length === 0) continue;
-		writeFileSync(join(project.root, doc), rewriteFences(ev.text, ev.fenceEdits));
+		if (ev.snippetEdits.length === 0) continue;
+		writeFileSync(join(project.root, doc), rewriteSnippets(ev.text, ev.snippetEdits));
 		changedDocs.push(doc);
 	}
 	return { report: toReport(await evaluate(project, paths)), changedDocs: changedDocs.sort() };
 }
 
 /**
- * The judgment half: advance pin shas in exactly the given files. Pins
- * whose anchor is broken are refused, never written.
+ * The judgment half: advance claim shas in exactly the given files.
+ * Claims whose anchor is broken are refused, never written.
  */
-export async function bless(
+export async function approve(
 	project: Project,
 	paths: string[]
-): Promise<{ blessed: number; refused: ReportEntry[]; changedDocs: string[] }> {
+): Promise<{ approved: number; refused: ReportEntry[]; changedDocs: string[] }> {
 	if (!paths?.length) {
-		throw new DocrefError('usage', 'bless requires explicit paths; there is no --all by design');
+		throw new DocrefError('usage', 'approve requires explicit paths; there is no --all by design');
 	}
 	const evaluations = await evaluate(project, paths);
-	let blessed = 0;
+	let approved = 0;
 	const refused: ReportEntry[] = [];
 	const changedDocs: string[] = [];
 	for (const [doc, ev] of evaluations) {
 		const edits = [];
-		for (const pin of ev.pins) {
-			if (!pin.anchor) {
+		for (const claim of ev.claims) {
+			if (!claim.anchor) {
 				refused.push({
 					doc,
-					line: pin.carrier.openLine,
-					carrier: 'pin',
-					ref: pin.carrier.ref,
+					line: claim.carrier.openLine,
+					kind: 'claim',
+					ref: claim.carrier.ref,
 					state: 'broken',
-					...(pin.reason ? { reason: pin.reason } : {})
+					...(claim.reason ? { reason: claim.reason } : {})
 				});
 				continue;
 			}
-			edits.push({ carrier: pin.carrier, sha: contentHash(pin.anchor.content).slice(0, 8) });
-			blessed++;
+			edits.push({ carrier: claim.carrier, sha: contentHash(claim.anchor.content).slice(0, 8) });
+			approved++;
 		}
 		if (edits.length > 0) {
-			const next = blessPins(ev.text, edits);
+			const next = approveClaims(ev.text, edits);
 			if (next !== ev.text) {
 				writeFileSync(join(project.root, doc), next);
 				changedDocs.push(doc);
 			}
 		}
 	}
-	return { blessed, refused, changedDocs: changedDocs.sort() };
+	return { approved, refused, changedDocs: changedDocs.sort() };
 }
 
 export type UpdateResult = {
@@ -286,13 +286,13 @@ export async function update(
 export type AffectedEntry = {
 	doc: string;
 	line: number;
-	carrier: 'fence' | 'pin';
+	kind: 'snippet' | 'claim';
 	ref: string;
 	reason: 'overlap' | 'broken';
 };
 
 /**
- * Map a change to the carriers it endangers: intersect the diff's changed
+ * Map a change to the references it endangers: intersect the diff's changed
  * line ranges with anchor spans in the working tree. Same-repo only; a
  * code repository cannot know who references it from outside.
  */
@@ -338,19 +338,19 @@ export async function affected(
 	const sourceFor = sourcePool(project);
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
-		const { carriers } = scanMarkdown(text);
-		for (const c of carriers) {
+		const { references } = scanMarkdown(text);
+		for (const c of references) {
 			let ref;
 			try {
 				ref = parseRef(c.ref);
 			} catch {
-				continue; // malformed carriers are check's findings, not affected's
+				continue; // malformed references are check's findings, not affected's
 			}
 			if (ref.alias) continue;
 			const change = changes.get(ref.path);
 			if (!change) continue;
 
-			const base = { doc, line: c.openLine, carrier: c.kind, ref: c.ref } as const;
+			const base = { doc, line: c.openLine, kind: c.kind, ref: c.ref } as const;
 			if (change.deleted) {
 				entries.push({ ...base, reason: 'broken' });
 				continue;
@@ -376,7 +376,7 @@ export async function affected(
 }
 
 export type RefIndex = {
-	refs: { ref: string; locations: { doc: string; line: number; carrier: 'fence' | 'pin' }[] }[];
+	refs: { ref: string; locations: { doc: string; line: number; kind: 'snippet' | 'claim' }[] }[];
 };
 
 export type AnchorEntry = {
@@ -384,7 +384,7 @@ export type AnchorEntry = {
 	name: string;
 	line: number; // begin marker, 1-based
 	endLine: number;
-	references: { doc: string; line: number; carrier: 'fence' | 'pin' }[];
+	references: { doc: string; line: number; kind: 'snippet' | 'claim' }[];
 };
 
 export type AnchorsResult = {
@@ -436,24 +436,24 @@ async function anchorFiles(project: Project): Promise<string[]> {
 
 /**
  * The code-side inventory (the reverse of ls): every declared region
- * marker, with the carriers referencing it; an empty list means the
- * anchor is not used. Marker errors surface even in files no carrier
- * references, which check alone would never visit.
+ * marker, with the references referencing it; an empty list means the
+ * anchor is not used. Marker errors surface even in
+ * files nothing references, which check alone would never visit.
  */
 export async function anchors(project: Project): Promise<AnchorsResult> {
 	const used = new Map<string, AnchorEntry['references']>();
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
-		for (const c of scanMarkdown(text).carriers) {
+		for (const c of scanMarkdown(text).references) {
 			try {
 				const ref = parseRef(c.ref);
 				if (ref.alias || ref.fragment?.kind !== 'region') continue;
 				const key = `${ref.path}#@${ref.fragment.name}`;
 				const list = used.get(key) ?? [];
-				list.push({ doc, line: c.openLine, carrier: c.kind });
+				list.push({ doc, line: c.openLine, kind: c.kind });
 				used.set(key, list);
 			} catch {
-				// malformed carriers are check's findings
+				// malformed references are check's findings
 			}
 		}
 	}
@@ -491,9 +491,9 @@ export async function ls(project: Project): Promise<RefIndex> {
 	const byRef = new Map<string, RefIndex['refs'][number]['locations']>();
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
-		for (const c of scanMarkdown(text).carriers) {
+		for (const c of scanMarkdown(text).references) {
 			const locations = byRef.get(c.ref) ?? [];
-			locations.push({ doc, line: c.openLine, carrier: c.kind });
+			locations.push({ doc, line: c.openLine, kind: c.kind });
 			byRef.set(c.ref, locations);
 		}
 	}

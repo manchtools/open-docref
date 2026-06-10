@@ -135,11 +135,11 @@ describe('symbolFragmentForSelection', () => {
 
 const REPORT: Report = {
 	entries: [
-		{ doc: 'docs/a.md', line: 3, carrier: 'fence', ref: 'src/x.ts#f', state: 'fresh' },
+		{ doc: 'docs/a.md', line: 3, kind: 'snippet', ref: 'src/x.ts#f', state: 'up-to-date' },
 		{
 			doc: 'docs/a.md',
 			line: 9,
-			carrier: 'pin',
+			kind: 'claim',
 			ref: 'src/x.ts#@r',
 			state: 'stale-claim',
 			pinned: '11111111',
@@ -148,14 +148,14 @@ const REPORT: Report = {
 		{
 			doc: 'docs/b.md',
 			line: 1,
-			carrier: 'fence',
+			kind: 'snippet',
 			ref: 'src/gone.ts#x',
 			state: 'broken',
 			reason: 'missing-file'
 		}
 	],
 	errors: [{ doc: 'docs/c.md', line: 4, code: 'nested-pin', message: 'pin blocks do not nest' }],
-	summary: { fresh: 1, staleSnippet: 0, staleClaim: 1, broken: 1 }
+	summary: { upToDate: 1, staleSnippet: 0, staleClaim: 1, broken: 1 }
 };
 
 describe('diagnosticsFromReport', () => {
@@ -166,24 +166,24 @@ describe('diagnosticsFromReport', () => {
 		expect(byDoc.get('docs/a.md')![0]!.message).toContain('stale-claim');
 		expect(byDoc.get('docs/b.md')![0]).toMatchObject({ line: 1, severity: 'error' });
 		expect(byDoc.get('docs/c.md')![0]).toMatchObject({ line: 4, severity: 'error' });
-		expect([...byDoc.values()].flat().some((d) => d.message.includes('fresh'))).toBe(false);
+		expect([...byDoc.values()].flat().some((d) => d.message.includes('up-to-date'))).toBe(false);
 	});
 });
 
 describe('buildRefTree', () => {
 	const index: RefIndex = {
 		refs: [
-			{ ref: 'src/gone.ts#x', locations: [{ doc: 'docs/b.md', line: 1, carrier: 'fence' }] },
+			{ ref: 'src/gone.ts#x', locations: [{ doc: 'docs/b.md', line: 1, kind: 'snippet' }] },
 			{
 				ref: 'src/x.ts#f',
-				locations: [{ doc: 'docs/a.md', line: 3, carrier: 'fence' }]
+				locations: [{ doc: 'docs/a.md', line: 3, kind: 'snippet' }]
 			}
 		]
 	};
 
 	it('rolls each ref up to its worst location state', () => {
 		const tree = buildRefTree(index, REPORT);
-		expect(tree.find((n) => n.ref === 'src/x.ts#f')?.state).toBe('fresh');
+		expect(tree.find((n) => n.ref === 'src/x.ts#f')?.state).toBe('up-to-date');
 		expect(tree.find((n) => n.ref === 'src/gone.ts#x')?.state).toBe('broken');
 	});
 
@@ -202,8 +202,8 @@ describe('buildAnchorTree', () => {
 					line: 3,
 					endLine: 7,
 					references: [
-						{ doc: 'docs/a.md', line: 4, carrier: 'fence' },
-						{ doc: 'docs/b.md', line: 9, carrier: 'pin' }
+						{ doc: 'docs/a.md', line: 4, kind: 'snippet' },
+						{ doc: 'docs/b.md', line: 9, kind: 'claim' }
 					]
 				},
 				{ file: 'src/b.ts', name: 'orphan', line: 1, endLine: 2, references: [] }
@@ -228,7 +228,7 @@ describe('buildAnchorTree', () => {
 					name: 'r',
 					line: 1,
 					endLine: 2,
-					references: [{ doc: 'docs/a.md', line: 1, carrier: 'fence' }]
+					references: [{ doc: 'docs/a.md', line: 1, kind: 'snippet' }]
 				}
 			],
 			errors: []
@@ -244,14 +244,14 @@ describe('statusText', () => {
 			statusText({
 				entries: [],
 				errors: [],
-				summary: { fresh: 3, staleSnippet: 0, staleClaim: 0, broken: 0 }
+				summary: { upToDate: 3, staleSnippet: 0, staleClaim: 0, broken: 0 }
 			})
 		).toBe('docref $(check) 3');
 		expect(
 			statusText({
 				entries: [],
 				errors: [],
-				summary: { fresh: 1, staleSnippet: 1, staleClaim: 1, broken: 0 }
+				summary: { upToDate: 1, staleSnippet: 1, staleClaim: 1, broken: 0 }
 			})
 		).toBe('docref $(warning) 2 stale');
 		expect(statusText(REPORT)).toBe('docref $(error) 1 broken, 1 stale');

@@ -1,24 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { scanMarkdown, rewriteFences, blessPins, type FenceCarrier, type PinCarrier } from './markdown';
+import { scanMarkdown, rewriteSnippets, approveClaims, type Snippet, type Claim } from './markdown';
 
-// Contract (format.md sections 3 and 4): snippet fences are code blocks
+// Contract (format.md sections 3 and 4): snippets are code blocks
 // whose info string carries docref= (required) and sha= (tool-written);
-// pin blocks are <!-- docref: begin key=value... --> ... <!-- docref: end -->.
-// Fences nested in longer example fences are content, not carriers. Pins do
-// not nest. The name form (region marker in a markdown source file) is not
-// a carrier. Malformed carriers are hard errors.
+// claims are <!-- docref: begin key=value... --> ... <!-- docref: end -->.
+// Fences nested in longer example fences are content, not references.
+// Claims do not nest. The name form (region marker in a markdown source
+// file) is not a reference. Malformed references are hard errors.
 
 const SHA = 'aabbccdd';
 
-function fences(text: string): FenceCarrier[] {
-	return scanMarkdown(text).carriers.filter((c): c is FenceCarrier => c.kind === 'fence');
+function snippets(text: string): Snippet[] {
+	return scanMarkdown(text).references.filter((c): c is Snippet => c.kind === 'snippet');
 }
-function pins(text: string): PinCarrier[] {
-	return scanMarkdown(text).carriers.filter((c): c is PinCarrier => c.kind === 'pin');
+function claims(text: string): Claim[] {
+	return scanMarkdown(text).references.filter((c): c is Claim => c.kind === 'claim');
 }
 
-describe('scanMarkdown: snippet fences', () => {
-	it('finds a fence carrier and captures language, ref, sha, and body', () => {
+describe('scanMarkdown: snippets', () => {
+	it('finds a snippet and captures language, ref, sha, and body', () => {
 		const doc = [
 			'# Title',
 			'',
@@ -28,11 +28,11 @@ describe('scanMarkdown: snippet fences', () => {
 			'```',
 			''
 		].join('\n');
-		const { carriers, errors } = scanMarkdown(doc);
+		const { references, errors } = scanMarkdown(doc);
 		expect(errors).toEqual([]);
-		expect(carriers).toHaveLength(1);
-		const f = carriers[0] as FenceCarrier;
-		expect(f.kind).toBe('fence');
+		expect(references).toHaveLength(1);
+		const f = references[0] as Snippet;
+		expect(f.kind).toBe('snippet');
 		expect(f.language).toBe('ts');
 		expect(f.ref).toBe('src/a.ts#foo');
 		expect(f.sha).toBe(SHA);
@@ -42,12 +42,12 @@ describe('scanMarkdown: snippet fences', () => {
 	});
 
 	it('ignores ordinary fences without docref=', () => {
-		expect(fences('```ts\ncode\n```\n')).toHaveLength(0);
+		expect(snippets('```ts\ncode\n```\n')).toHaveLength(0);
 	});
 
 	it('accepts attributes in any order and preserves unknown tokens', () => {
 		const doc = `\`\`\`go sha=${SHA} highlight=2 docref=src/a.go#X\ncode\n\`\`\`\n`;
-		const f = fences(doc)[0]!;
+		const f = snippets(doc)[0]!;
 		expect(f.ref).toBe('src/a.go#X');
 		expect(f.sha).toBe(SHA);
 		expect(f.tokens).toContain('highlight=2');
@@ -57,10 +57,10 @@ describe('scanMarkdown: snippet fences', () => {
 		const doc = '```ts docref=src/a.ts#foo\n```\n';
 		const { errors } = scanMarkdown(doc);
 		expect(errors).toEqual([]);
-		expect(fences(doc)[0]!.sha).toBeUndefined();
+		expect(snippets(doc)[0]!.sha).toBeUndefined();
 	});
 
-	it('does not treat example fences inside longer fences as carriers', () => {
+	it('does not treat example fences inside longer fences as snippets', () => {
 		// the README documents docref with a ts fence inside a markdown fence
 		const doc = [
 			'````markdown',
@@ -69,70 +69,70 @@ describe('scanMarkdown: snippet fences', () => {
 			'```',
 			'````'
 		].join('\n');
-		const { carriers, errors } = scanMarkdown(doc);
-		expect(carriers).toHaveLength(0);
+		const { references, errors } = scanMarkdown(doc);
+		expect(references).toHaveLength(0);
 		expect(errors).toEqual([]);
 	});
 
 	it('supports tilde fences', () => {
 		const doc = `~~~py docref=src/a.py#run sha=${SHA}\npass\n~~~\n`;
-		expect(fences(doc)[0]!.fenceChar).toBe('~');
+		expect(snippets(doc)[0]!.fenceChar).toBe('~');
 	});
 
 	it('rejects a malformed sha attribute', () => {
 		const doc = '```ts docref=src/a.ts#foo sha=XYZ\ncode\n```\n';
-		const { carriers, errors } = scanMarkdown(doc);
-		expect(carriers).toHaveLength(0);
-		expect(errors.some((e) => e.code === 'malformed-carrier')).toBe(true);
+		const { references, errors } = scanMarkdown(doc);
+		expect(references).toHaveLength(0);
+		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
 	});
 
 	it('rejects an unparseable ref', () => {
 		const doc = `\`\`\`ts docref=/abs/path.ts#x sha=${SHA}\ncode\n\`\`\`\n`;
 		const { errors } = scanMarkdown(doc);
-		expect(errors.some((e) => e.code === 'malformed-carrier')).toBe(true);
+		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
 	});
 
-	it('rejects an unclosed fence carrier', () => {
+	it('rejects an unclosed snippet', () => {
 		const doc = `\`\`\`ts docref=src/a.ts#foo sha=${SHA}\ncode\n`;
 		const { errors } = scanMarkdown(doc);
-		expect(errors.some((e) => e.code === 'unclosed-fence')).toBe(true);
+		expect(errors.some((e) => e.code === 'unclosed-snippet')).toBe(true);
 	});
 });
 
-describe('scanMarkdown: pin blocks', () => {
-	it('finds a pin block with src and sha', () => {
+describe('scanMarkdown: claims', () => {
+	it('finds a claim with src and sha', () => {
 		const doc = [
 			`<!-- docref: begin src=src/a.go#Verify sha=${SHA} -->`,
 			'The handler rejects forged signatures.',
 			'<!-- docref: end -->'
 		].join('\n');
-		const { carriers, errors } = scanMarkdown(doc);
+		const { references, errors } = scanMarkdown(doc);
 		expect(errors).toEqual([]);
-		const p = carriers[0] as PinCarrier;
-		expect(p.kind).toBe('pin');
+		const p = references[0] as Claim;
+		expect(p.kind).toBe('claim');
 		expect(p.ref).toBe('src/a.go#Verify');
 		expect(p.sha).toBe(SHA);
 		expect(p.openLine).toBe(1);
 		expect(p.closeLine).toBe(3);
 	});
 
-	it('treats a pin without sha as unblessed, not malformed', () => {
+	it('treats a claim without sha as unapproved, not malformed', () => {
 		const doc = '<!-- docref: begin src=src/a.go#Verify -->\nprose\n<!-- docref: end -->';
 		const { errors } = scanMarkdown(doc);
 		expect(errors).toEqual([]);
-		expect(pins(doc)[0]!.sha).toBeUndefined();
+		expect(claims(doc)[0]!.sha).toBeUndefined();
 	});
 
-	it('rejects a pin without src=', () => {
+	it('rejects a claim without src=', () => {
 		const doc = `<!-- docref: begin sha=${SHA} -->\nprose\n<!-- docref: end -->`;
 		const { errors } = scanMarkdown(doc);
-		expect(errors.some((e) => e.code === 'malformed-carrier')).toBe(true);
+		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
 	});
 
 	it('rejects mixed name/attribute argument tokens', () => {
 		const doc = '<!-- docref: begin src=src/a.ts#x oops -->\nprose\n<!-- docref: end -->';
 		const { errors } = scanMarkdown(doc);
-		expect(errors.some((e) => e.code === 'malformed-carrier')).toBe(true);
+		expect(errors.some((e) => e.code === 'malformed-reference')).toBe(true);
 	});
 
 	it('ignores the name form: a region marker in a markdown source file', () => {
@@ -141,12 +141,12 @@ describe('scanMarkdown: pin blocks', () => {
 			'<nav>...</nav>',
 			'<!-- docref: end nav-skeleton -->'
 		].join('\n');
-		const { carriers, errors } = scanMarkdown(doc);
-		expect(carriers).toHaveLength(0);
+		const { references, errors } = scanMarkdown(doc);
+		expect(references).toHaveLength(0);
 		expect(errors).toEqual([]);
 	});
 
-	it('rejects nested pins', () => {
+	it('rejects nested claims', () => {
 		const doc = [
 			'<!-- docref: begin src=a.ts#x -->',
 			'<!-- docref: begin src=b.ts#y -->',
@@ -154,27 +154,27 @@ describe('scanMarkdown: pin blocks', () => {
 			'<!-- docref: end -->'
 		].join('\n');
 		const { errors } = scanMarkdown(doc);
-		expect(errors.some((e) => e.code === 'nested-pin')).toBe(true);
+		expect(errors.some((e) => e.code === 'nested-claim')).toBe(true);
 	});
 
-	it('rejects an unclosed pin', () => {
+	it('rejects an unclosed claim', () => {
 		const { errors } = scanMarkdown('<!-- docref: begin src=a.ts#x -->\nprose\n');
-		expect(errors.some((e) => e.code === 'unclosed-pin')).toBe(true);
+		expect(errors.some((e) => e.code === 'unclosed-claim')).toBe(true);
 	});
 
 	it('rejects a bare end without a begin', () => {
 		const { errors } = scanMarkdown('prose\n<!-- docref: end -->\n');
-		expect(errors.some((e) => e.code === 'unmatched-pin-end')).toBe(true);
+		expect(errors.some((e) => e.code === 'unmatched-claim-end')).toBe(true);
 	});
 
-	it('ignores pin syntax inside code fences', () => {
+	it('ignores claim syntax inside code fences', () => {
 		const doc = ['```markdown', '<!-- docref: begin src=a.ts#x -->', '```'].join('\n');
-		const { carriers, errors } = scanMarkdown(doc);
-		expect(carriers).toHaveLength(0);
+		const { references, errors } = scanMarkdown(doc);
+		expect(references).toHaveLength(0);
 		expect(errors).toEqual([]);
 	});
 
-	it('finds a fence inside a pin block as an independent carrier', () => {
+	it('finds a snippet inside a claim as an independent reference', () => {
 		const doc = [
 			`<!-- docref: begin src=src/a.ts#foo sha=${SHA} -->`,
 			'Claim about foo.',
@@ -184,19 +184,19 @@ describe('scanMarkdown: pin blocks', () => {
 			'```',
 			'<!-- docref: end -->'
 		].join('\n');
-		const { carriers, errors } = scanMarkdown(doc);
+		const { references, errors } = scanMarkdown(doc);
 		expect(errors).toEqual([]);
-		expect(carriers.map((c) => c.kind).sort()).toEqual(['fence', 'pin']);
-		const pin = carriers.find((c) => c.kind === 'pin') as PinCarrier;
-		expect(pin.closeLine).toBe(7);
+		expect(references.map((c) => c.kind).sort()).toEqual(['claim', 'snippet']);
+		const claim = references.find((c) => c.kind === 'claim') as Claim;
+		expect(claim.closeLine).toBe(7);
 	});
 });
 
-describe('rewriteFences', () => {
+describe('rewriteSnippets', () => {
 	it('replaces the body and writes sha after docref, preserving other tokens', () => {
 		const doc = `before\n\`\`\`ts docref=src/a.ts#foo highlight=2\nold\n\`\`\`\nafter\n`;
-		const f = fences(doc)[0]!;
-		const out = rewriteFences(doc, [{ carrier: f, body: 'new line 1\nnew line 2', sha: SHA }]);
+		const f = snippets(doc)[0]!;
+		const out = rewriteSnippets(doc, [{ carrier: f, body: 'new line 1\nnew line 2', sha: SHA }]);
 		expect(out).toContain(`\`\`\`ts docref=src/a.ts#foo sha=${SHA} highlight=2`);
 		expect(out).toContain('new line 1\nnew line 2');
 		expect(out).not.toContain('old');
@@ -206,7 +206,7 @@ describe('rewriteFences', () => {
 
 	it('updates an existing sha in place', () => {
 		const doc = `\`\`\`ts docref=src/a.ts#foo sha=11111111\nold\n\`\`\`\n`;
-		const out = rewriteFences(doc, [{ carrier: fences(doc)[0]!, body: 'new', sha: SHA }]);
+		const out = rewriteSnippets(doc, [{ carrier: snippets(doc)[0]!, body: 'new', sha: SHA }]);
 		expect(out).toContain(`sha=${SHA}`);
 		expect(out).not.toContain('sha=11111111');
 	});
@@ -214,13 +214,13 @@ describe('rewriteFences', () => {
 	it('lengthens the fence when the body itself contains a fence', () => {
 		const doc = `\`\`\`md docref=src/ex.md#@demo sha=${SHA}\nx\n\`\`\`\n`;
 		const body = '```js\nrun()\n```';
-		const out = rewriteFences(doc, [{ carrier: fences(doc)[0]!, body, sha: SHA }]);
+		const out = rewriteSnippets(doc, [{ carrier: snippets(doc)[0]!, body, sha: SHA }]);
 		// the rewritten doc must round-trip: one carrier, same body
-		const { carriers, errors } = scanMarkdown(out);
+		const { references, errors } = scanMarkdown(out);
 		expect(errors).toEqual([]);
-		expect(carriers).toHaveLength(1);
-		expect((carriers[0] as FenceCarrier).body).toBe(body);
-		expect((carriers[0] as FenceCarrier).fenceLen).toBeGreaterThanOrEqual(4);
+		expect(references).toHaveLength(1);
+		expect((references[0] as Snippet).body).toBe(body);
+		expect((references[0] as Snippet).fenceLen).toBeGreaterThanOrEqual(4);
 	});
 
 	it('rewrites multiple fences in one document correctly', () => {
@@ -234,29 +234,29 @@ describe('rewriteFences', () => {
 			'```',
 			''
 		].join('\n');
-		const [f1, f2] = fences(doc);
-		const out = rewriteFences(doc, [
+		const [f1, f2] = snippets(doc);
+		const out = rewriteSnippets(doc, [
 			{ carrier: f1!, body: 'ONE', sha: SHA },
 			{ carrier: f2!, body: 'TWO', sha: SHA }
 		]);
-		const rescanned = fences(out);
+		const rescanned = snippets(out);
 		expect(rescanned[0]!.body).toBe('ONE');
 		expect(rescanned[1]!.body).toBe('TWO');
 		expect(out).toContain('mid');
 	});
 });
 
-describe('blessPins', () => {
-	it('writes sha on an unblessed pin without touching the prose', () => {
+describe('approveClaims', () => {
+	it('writes sha on an unapproved claim without touching the prose', () => {
 		const doc = '<!-- docref: begin src=src/a.go#Verify -->\nThe exact claim.\n<!-- docref: end -->\n';
-		const out = blessPins(doc, [{ carrier: pins(doc)[0]!, sha: SHA }]);
+		const out = approveClaims(doc, [{ carrier: claims(doc)[0]!, sha: SHA }]);
 		expect(out).toContain(`<!-- docref: begin src=src/a.go#Verify sha=${SHA} -->`);
 		expect(out).toContain('The exact claim.');
 	});
 
 	it('advances an existing sha', () => {
 		const doc = `<!-- docref: begin src=src/a.go#Verify sha=11111111 -->\np\n<!-- docref: end -->\n`;
-		const out = blessPins(doc, [{ carrier: pins(doc)[0]!, sha: SHA }]);
+		const out = approveClaims(doc, [{ carrier: claims(doc)[0]!, sha: SHA }]);
 		expect(out).toContain(`sha=${SHA}`);
 		expect(out).not.toContain('sha=11111111');
 	});

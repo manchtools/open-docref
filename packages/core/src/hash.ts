@@ -22,7 +22,7 @@ export function shortHash(content: string): string {
 /**
  * Compare a stored hash against another (either may be a prefix). Matching
  * needs at least 8 hex characters on both sides; anything thinner is
- * treated as a mismatch so a truncated value can never bless by accident.
+ * treated as a mismatch so a truncated value can never approve by accident.
  */
 export function hashesMatch(a: string | undefined, b: string | undefined): boolean {
 	if (!a || !b) return false;

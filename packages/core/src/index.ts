@@ -4,11 +4,11 @@ export { parseRef, type Ref, type Fragment } from './ref';
 export { scanRegions, extractRegion, type Region, type RegionError } from './regions';
 export {
 	scanMarkdown,
-	rewriteFences,
-	blessPins,
-	type Carrier,
-	type FenceCarrier,
-	type PinCarrier,
+	rewriteSnippets,
+	approveClaims,
+	type Reference,
+	type Snippet,
+	type Claim,
 	type ScanError
 } from './markdown';
 export { listDeclarations, findSymbol, configureWasm, type Decl, type WasmConfig } from './symbols';
@@ -19,7 +19,7 @@ export { ensureCommit, branchTip, gitRevSource } from './gitcache';
 export {
 	check,
 	refresh,
-	bless,
+	approve,
 	update,
 	affected,
 	ls,
