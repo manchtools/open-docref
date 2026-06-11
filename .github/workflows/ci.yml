@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run check
+
+      - name: Test (the contract suite)
+        run: bun test
+
+      - name: Build CLI and extension
+        run: bun run build
+
+      # Dogfood: the tool gates its own repository. A broken or stale
+      # reference in the docs fails the build, exactly as it would for a
+      # consumer.
+      - name: docref self-check
+        run: node packages/cli/dist/docref.js check
