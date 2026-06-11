@@ -216,6 +216,12 @@ so the editor and CI can never disagree about what counts as stale.
   the selection is exactly a declaration, copies the symbol ref with no
   marker inserted.
 <!-- docref: end -->
+<!-- docref: begin src=packages/vscode/src/logic.ts#refCompletionContext:e475ab72,packages/vscode/src/extension.ts#pathCompletions:fd76207e,packages/vscode/src/extension.ts#fragmentCompletions:54729bcf -->
+- **Reference autocomplete:** typing a `docref=` or `src=` value in a
+  markdown file completes the file path, then the symbol or `@region`
+  inside it, and inserts the `:sha` already computed — nobody types a hash
+  by hand. Multi-source claims complete the segment after each comma.
+<!-- docref: end -->
 - **Collection sidebar:** add the current selection to a chosen
   collection file as a claim with an empty note; reorder and
   annotate; "fold into document" moves blocks into a target markdown

@@ -13,7 +13,8 @@ import {
 	buildStageTree,
 	type SidebarNode,
 	isRelevantChange,
-	statusText
+	statusText,
+	refCompletionContext
 } from './logic';
 
 // Contract for the extension's decision logic (tooling.md section 3). The
@@ -347,5 +348,72 @@ describe('statusText', () => {
 				summary: { upToDate: 2, staleSnippet: 0, staleClaim: 0, broken: 0 }
 			})
 		).toBe('docref $(warning) 1 unused');
+	});
+});
+
+describe('refCompletionContext: autocomplete inside a docref reference', () => {
+	// `|` marks the cursor; the helper drops it and passes its index as the
+	// character. Only the text before the cursor decides the context.
+	const ctx = (s: string) => refCompletionContext(s.replace('|', ''), s.indexOf('|'));
+
+	it('offers path completion inside a snippet docref= value', () => {
+		expect(ctx('```ts docref=src/li|')).toEqual({ phase: 'path', partial: 'src/li' });
+	});
+
+	it('offers path completion right after the equals', () => {
+		expect(ctx('```ts docref=|')).toEqual({ phase: 'path', partial: '' });
+	});
+
+	it('switches to fragment completion after #', () => {
+		expect(ctx('```ts docref=src/lib.ts#gr|')).toEqual({
+			phase: 'fragment',
+			path: 'src/lib.ts',
+			kind: 'any',
+			partial: 'gr'
+		});
+	});
+
+	it('offers region-only fragments after #@', () => {
+		expect(ctx('```ts docref=src/lib.ts#@re|')).toEqual({
+			phase: 'fragment',
+			path: 'src/lib.ts',
+			kind: 'region',
+			partial: 're'
+		});
+	});
+
+	it('works inside a claim src= value', () => {
+		expect(ctx('<!-- docref: begin src=src/x|')).toEqual({ phase: 'path', partial: 'src/x' });
+	});
+
+	it('completes the segment after the last comma in a multi-source claim', () => {
+		expect(ctx('<!-- docref: begin src=a.ts#x,src/b.ts#fo|')).toEqual({
+			phase: 'fragment',
+			path: 'src/b.ts',
+			kind: 'any',
+			partial: 'fo'
+		});
+	});
+
+	it('carries a declared alias through to the fragment context', () => {
+		expect(ctx('<!-- docref: begin src=lib:src/x.ts#f|')).toEqual({
+			phase: 'fragment',
+			alias: 'lib',
+			path: 'src/x.ts',
+			kind: 'any',
+			partial: 'f'
+		});
+	});
+
+	it('returns null for a non-docref src= (an HTML img, not a claim)', () => {
+		expect(ctx('<img src=foo|')).toBeNull();
+	});
+
+	it('returns null once the cursor leaves the value (a space ends a ref)', () => {
+		expect(ctx('```ts docref=src/x.ts#fn |')).toBeNull();
+	});
+
+	it('uses only the text before the cursor', () => {
+		expect(ctx('```ts docref=src/li|b.ts#x more')).toEqual({ phase: 'path', partial: 'src/li' });
 	});
 });

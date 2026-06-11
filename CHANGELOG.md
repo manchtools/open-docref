@@ -37,6 +37,10 @@ under its own heading and noted in the relevant document under [docs/](docs/).
 
 ### Added
 
+- VS Code reference autocomplete: typing a `docref=` or `src=` value in a
+  markdown file completes the file path, then the symbol or `@region` inside
+  it, and inserts the `:sha` already computed (multi-source claims complete the
+  segment after each comma).
 - A continuous-integration workflow that runs the typecheck, the contract
   suite, the build, and a `docref check` of this repository against itself.
 - Distribution as standalone binaries, via GitHub releases only — no package

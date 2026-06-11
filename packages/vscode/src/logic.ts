@@ -419,3 +419,55 @@ export function buildStageTree(staged: { ref: string; sha?: string }[]): Sidebar
 		state: 'unknown'
 	}));
 }
+
+export type RefCompletion =
+	| { phase: 'path'; alias?: string; partial: string }
+	| { phase: 'fragment'; alias?: string; path: string; kind: 'any' | 'region'; partial: string };
+
+/**
+ * What a completion at `character` on `line` should offer when the cursor sits
+ * inside a docref reference value — the `docref=` of a snippet fence or the
+ * `src=` of a claim comment (for a multi-source claim, the segment after the
+ * last comma). Returns null when the cursor is not in such a value, so an
+ * ordinary `src=` (an HTML `<img>`) is left alone. Pure and unit-tested; the
+ * vscode layer turns the result into file / symbol / region items and computes
+ * the `:sha`.
+ */
+export function refCompletionContext(line: string, character: number): RefCompletion | null {
+	const before = line.slice(0, Math.max(0, character));
+	let value: string | null = null;
+	const snippet = /docref=([^\s]*)$/.exec(before);
+	if (snippet) {
+		value = snippet[1]!;
+	} else {
+		const claim = /src=([^\s]*)$/.exec(before);
+		if (claim && /docref:\s*begin\b/.test(before.slice(0, claim.index))) value = claim[1]!;
+	}
+	if (value === null) return null;
+
+	// a reference cannot contain a space; commas separate a claim's sources, so
+	// the active reference is the segment after the last comma
+	const seg = value.split(',').pop() ?? '';
+	const splitAlias = (s: string): { alias?: string; rest: string } => {
+		const c = s.indexOf(':');
+		return c > 0 && /^[a-z0-9][a-z0-9-]*$/.test(s.slice(0, c))
+			? { alias: s.slice(0, c), rest: s.slice(c + 1) }
+			: { rest: s };
+	};
+
+	const hash = seg.indexOf('#');
+	if (hash === -1) {
+		const { alias, rest } = splitAlias(seg);
+		return { phase: 'path', ...(alias ? { alias } : {}), partial: rest };
+	}
+	const { alias, rest } = splitAlias(seg.slice(0, hash));
+	const frag = seg.slice(hash + 1);
+	const region = frag.startsWith('@');
+	return {
+		phase: 'fragment',
+		...(alias ? { alias } : {}),
+		path: rest,
+		kind: region ? 'region' : 'any',
+		partial: region ? frag.slice(1) : frag
+	};
+}

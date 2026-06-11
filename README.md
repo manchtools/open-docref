@@ -140,7 +140,8 @@ implemented and tested (milestones 1 through 5 of the plan): same-repo
 and cross-repo resolution, symbols (TypeScript, JavaScript, Go, Python)
 and regions, `check`, `refresh`, `approve`, `update`, `affected`,
 `ls`, `anchors`,
-and in the editor: create-anchor from a selection, the references
+and in the editor: create-anchor from a selection, reference autocomplete
+(path → symbol/region, with the hash attached), the references
 sidebar with live states, drift diagnostics, referenced-by CodeLens,
 and a status-bar counter.
 

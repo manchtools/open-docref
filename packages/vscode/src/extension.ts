@@ -2,6 +2,7 @@
 // Everything that decides or formats lives in logic.ts (unit-tested);
 // this file only moves data between the core and the editor.
 import * as vscode from 'vscode';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
 	configureWasm,
@@ -23,6 +24,8 @@ import {
 	listDeclarations,
 	languageForFile,
 	scanRegions,
+	extractRegion,
+	contentHash,
 	type Project,
 	type Report,
 	type RefIndex,
@@ -41,9 +44,106 @@ import {
 	buildStageTree,
 	isRelevantChange,
 	statusText,
+	refCompletionContext,
 	type Leader,
 	type SidebarNode
 } from './logic';
+
+const COMPLETION_NOISE = new Set([
+	'node_modules',
+	'.git',
+	'.svelte-kit',
+	'dist',
+	'build',
+	'out',
+	'coverage',
+	'target'
+]);
+
+/** File/directory items for the path phase of a docref reference. */
+function pathCompletions(root: string, partial: string, range: vscode.Range): vscode.CompletionItem[] {
+	const slash = partial.lastIndexOf('/');
+	const dir = slash === -1 ? '' : partial.slice(0, slash + 1);
+	const base = (slash === -1 ? partial : partial.slice(slash + 1)).toLowerCase();
+	let entries;
+	try {
+		entries = readdirSync(join(root, dir), { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	const items: vscode.CompletionItem[] = [];
+	for (const e of entries) {
+		if (e.name.startsWith('.') || COMPLETION_NOISE.has(e.name)) continue;
+		if (!e.name.toLowerCase().startsWith(base)) continue;
+		if (e.isDirectory()) {
+			const item = new vscode.CompletionItem(e.name + '/', vscode.CompletionItemKind.Folder);
+			item.insertText = e.name + '/';
+			item.range = range;
+			// drill into the next level immediately
+			item.command = { command: 'editor.action.triggerSuggest', title: '' };
+			items.push(item);
+		} else if (e.isFile()) {
+			const item = new vscode.CompletionItem(e.name, vscode.CompletionItemKind.File);
+			item.insertText = e.name; // then type `#` (a trigger) for a fragment
+			item.range = range;
+			items.push(item);
+		}
+	}
+	return items;
+}
+
+/**
+ * Symbol and region items for the fragment phase, each with its `:sha` already
+ * computed and attached to the insert text — the hash is never typed by hand.
+ * Regions come from the marker scan; symbols from the (cached) tree-sitter
+ * parse, skipped for languages without symbol support.
+ */
+async function fragmentCompletions(
+	root: string,
+	path: string,
+	kind: 'any' | 'region',
+	range: vscode.Range
+): Promise<vscode.CompletionItem[]> {
+	let text: string;
+	try {
+		text = readFileSync(join(root, path), 'utf8');
+	} catch {
+		return [];
+	}
+	const items: vscode.CompletionItem[] = [];
+
+	for (const name of scanRegions(text).regions.keys()) {
+		let sha: string;
+		try {
+			sha = contentHash(extractRegion(text, name)).slice(0, 8);
+		} catch {
+			continue;
+		}
+		const item = new vscode.CompletionItem('@' + name, vscode.CompletionItemKind.Reference);
+		// `@` is part of the fragment: add it only when the user has not yet typed it
+		item.insertText = `${kind === 'region' ? '' : '@'}${name}:${sha}`;
+		item.detail = `region · ${sha}`;
+		item.range = range;
+		items.push(item);
+	}
+
+	if (kind === 'any' && languageForFile(path)) {
+		try {
+			for (const d of await listDeclarations(text, path)) {
+				const name = d.path.join('.');
+				const sha = contentHash(d.content).slice(0, 8);
+				const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Function);
+				item.insertText = `${name}:${sha}`;
+				item.detail = `symbol · ${sha}`;
+				item.range = range;
+				items.push(item);
+			}
+		} catch {
+			// language not supported for symbols: regions still offered
+		}
+	}
+	return items;
+}
 
 let report: Report | null = null;
 let index: RefIndex | null = null;
@@ -412,6 +512,28 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	// Autocomplete a docref reference as it is typed: file path, then the
+	// symbol or @region inside it, with the :sha computed and attached inline.
+	const completionProvider: vscode.CompletionItemProvider = {
+		async provideCompletionItems(doc, position) {
+			const root = workspaceRoot();
+			if (!root) return;
+			const ctx = refCompletionContext(doc.lineAt(position.line).text, position.character);
+			if (!ctx || ctx.alias) return; // cross-repo file/symbol listing is not offered
+			const word =
+				ctx.phase === 'path' ? ctx.partial.slice(ctx.partial.lastIndexOf('/') + 1) : ctx.partial;
+			const range = new vscode.Range(
+				position.line,
+				position.character - word.length,
+				position.line,
+				position.character
+			);
+			return ctx.phase === 'path'
+				? pathCompletions(root, ctx.partial, range)
+				: await fragmentCompletions(root, ctx.path, ctx.kind, range);
+		}
+	};
+
 	context.subscriptions.push(
 		diagnostics,
 		status,
@@ -459,6 +581,16 @@ export function activate(context: vscode.ExtensionContext): void {
 			await rescan();
 		}),
 		vscode.languages.registerCodeLensProvider({ scheme: 'file' }, lensProvider),
+		vscode.languages.registerCompletionItemProvider(
+			{ language: 'markdown' },
+			completionProvider,
+			'/',
+			'#',
+			'@',
+			'=',
+			',',
+			':'
+		),
 		vscode.commands.registerCommand('docref.createAnchor', createAnchor),
 		vscode.commands.registerCommand('docref.rescan', () => rescan()),
 		vscode.commands.registerCommand('docref.refreshSnippets', async () => {

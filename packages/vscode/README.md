@@ -27,6 +27,9 @@ VS Code Marketplace by design.
 - **Create anchor** from a selection — inserts a region marker pair (comment
   leader auto-detected) or copies a symbol reference when the selection is
   exactly one declaration.
+- **Reference autocomplete** — typing a `docref=` or `src=` value completes the
+  file path, then the symbol or `@region` inside it, and attaches the `:sha`
+  for you. No hashes typed by hand.
 - **References, Anchors, and Staged sidebars** — triage drift, browse the
   reverse index, and stage references to insert with their hashes precomputed.
 - **Status bar** — a repo-wide count of stale and broken references.
