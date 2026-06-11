@@ -81,3 +81,6 @@ and restart the editor.
 - [docs/format.md](docs/format.md): the normative format specification
 - [docs/tooling.md](docs/tooling.md): CLI surface, CI patterns, VSCode
   extension, agent contract, implementation plan
+- [CONTRIBUTING.md](CONTRIBUTING.md): layout, the build/test loop, and the
+  bar for changes
+- [CHANGELOG.md](CHANGELOG.md): notable changes per version
