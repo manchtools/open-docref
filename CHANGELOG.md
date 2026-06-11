@@ -39,13 +39,17 @@ under its own heading and noted in the relevant document under [docs/](docs/).
 
 - A continuous-integration workflow that runs the typecheck, the contract
   suite, the build, and a `docref check` of this repository against itself.
-- Distribution packaging. The `open-docref` CLI publishes to npm as a
-  self-contained bundle that declares the tree-sitter WebAssembly runtimes as
-  its own dependencies, and the VS Code extension packages a self-contained
-  `.vsix` (the `web-tree-sitter` runtime and grammar wasm are bundled in, so it
-  resolves nothing through `node_modules`). A tag-triggered release workflow
-  publishes the CLI to npm and the extension to the VS Code Marketplace and
-  Open VSX.
+- Distribution as standalone binaries, via GitHub releases only — no package
+  registry, no marketplace, no account. The CLI compiles with
+  `bun build --compile` into one self-contained executable per platform
+  (linux/macOS x64 + arm64, windows x64) with the tree-sitter WebAssembly
+  embedded, so it needs neither Node nor `node_modules`. The VS Code extension
+  ships as a self-contained `.vsix` (the `web-tree-sitter` runtime and grammar
+  wasm bundled in). A tag-triggered release workflow builds all of them and
+  attaches them to the GitHub release.
+- `install.sh` (curl-pipe installer that fetches the right binary), the
+  `docref self-update` command that replaces the binary in place, and
+  `docref --version` / `-v`.
 
 ## [0.1.0] - 2026-06-10
 

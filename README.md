@@ -57,17 +57,28 @@ still true and approves it.
 
 ## Install
 
-The CLI, from npm — Node 18+ (symbol resolution ships as bundled
-WebAssembly grammars, so there is no native build step):
+The CLI is a single standalone binary — no Node, no npm, no registry account.
+The installer downloads the build for your platform from the latest release:
 
 ```sh
-npm install -g open-docref      # then: docref check
-# or run it ad hoc, zero install:
-npx open-docref check
+curl -fsSL https://raw.githubusercontent.com/manchtools/open-docref/main/install.sh | sh
 ```
 
-The VS Code extension: search **open-docref** in the Marketplace (or on
-[Open VSX](https://open-vsx.org)), or install the `.vsix` from a release.
+It lands in `~/.local/bin/docref` (override with `DOCREF_INSTALL_DIR`) and
+updates itself in place with `docref self-update`. On Windows, download
+`docref-windows-x64.exe` from the releases page. Building from source is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+The VS Code extension: download the `.vsix` from the
+[GitHub releases](https://github.com/manchtools/open-docref/releases) and
+install it — in the editor run *Extensions: Install from VSIX…*, or:
+
+```sh
+code --install-extension open-docref-vscode-<version>.vsix
+```
+
+It is intentionally not on the VS Code Marketplace; the `.vsix` is the
+distribution.
 
 ## Status
 

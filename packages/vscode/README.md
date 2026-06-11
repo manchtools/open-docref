@@ -2,8 +2,16 @@
 
 Keep documentation anchored to the code it describes, without leaving the
 editor. This extension is ergonomics over the same core the
-[`open-docref`](https://www.npmjs.com/package/open-docref) CLI uses, so the
+[`open-docref`](https://github.com/manchtools/open-docref) CLI uses, so the
 editor and CI never disagree about what counts as stale.
+
+## Install
+
+Download the `.vsix` from the
+[GitHub releases](https://github.com/manchtools/open-docref/releases) and
+install it — run *Extensions: Install from VSIX…* from the command palette, or
+`code --install-extension open-docref-vscode-<version>.vsix`. It is not on the
+VS Code Marketplace by design.
 
 ## Features
 

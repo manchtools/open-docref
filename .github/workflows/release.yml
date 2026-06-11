@@ -1,10 +1,10 @@
 name: release
 
-# Publishes on a version tag (e.g. v0.1.0). Requires these repository secrets:
-#   NPM_TOKEN   — npm automation token (publishes the `open-docref` CLI)
-#   VSCE_PAT    — VS Code Marketplace personal access token
-#   OVSX_TOKEN  — Open VSX access token
-# A missing token fails only that job; the others still publish.
+# On a version tag (e.g. v0.1.0): verify, then build the standalone CLI
+# binaries for every platform and the VS Code .vsix, and attach them all to a
+# GitHub release. No package registries, no marketplace, no account or token —
+# users install the binary via install.sh / `docref self-update`, and the
+# extension by downloading the .vsix.
 
 on:
   push:
@@ -28,45 +28,35 @@ jobs:
       - run: bun run build
       - run: node packages/cli/dist/docref.js check
 
-  npm:
+  release:
     needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
-      # `npm publish` runs the package's prepack (bun build) to produce the
-      # self-contained bundle before packing.
-      - name: Publish the CLI to npm
-        working-directory: packages/cli
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  vscode:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      # vsce/ovsx run the extension's vscode:prepublish (bun run build:ext),
-      # which bundles the extension and copies the tree-sitter wasm into dist.
-      - name: Publish to the VS Code Marketplace
+      # Bun cross-compiles every target from this one Linux runner.
+      - name: Build the standalone binaries
+        run: |
+          mkdir -p out
+          for t in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            bun build --compile --target="bun-$t" packages/cli/src/standalone.ts --outfile "out/docref-$t"
+          done
+          bun build --compile --target=bun-windows-x64 packages/cli/src/standalone.ts --outfile out/docref-windows-x64.exe
+
+      - name: Build the VS Code .vsix
         working-directory: packages/vscode
-        run: npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
+        run: npx --yes @vscode/vsce@latest package --no-dependencies -o ../../out/
+
+      - name: Create the GitHub release and attach the binaries + .vsix
         env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      - name: Publish to Open VSX
-        working-directory: packages/vscode
-        run: npx --yes ovsx@latest publish --no-dependencies -p "$OVSX_TOKEN"
-        env:
-          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --title "$GITHUB_REF_NAME" --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" out/* --clobber

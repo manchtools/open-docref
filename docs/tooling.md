@@ -267,10 +267,11 @@ boundary and the risk of two resolvers disagreeing.
 - **Git: shell out to the system `git`.** Shallow clone and fetch by
   rev into the cache. The user's existing credentials cover private
   repositories.
-- **Distribution: npm.** `npx docref check` / `bunx docref check` runs
-  zero-install in CI. If a dependency-free binary becomes worthwhile,
-  `bun build --compile` produces per-platform executables from the
-  same codebase.
+- **Distribution: standalone binaries.** `bun build --compile` produces one
+  self-contained executable per platform with the tree-sitter wasm embedded —
+  no Node, no registry. They are attached to GitHub releases and installed via
+  `install.sh` or `docref self-update`. In CI the install is one step before
+  `docref check`.
 - **Layout:** one repository, workspaces:
 
 ```
