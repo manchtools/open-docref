@@ -23,6 +23,8 @@ import {
 import { workingTreeSource, resolveAnchor, type Anchor, type FileSource } from './resolve';
 import { branchTip, gitRevSource } from './gitcache';
 import { scanRegions } from './regions';
+import { listDeclarations } from './symbols';
+import { languageForFile } from './languages';
 
 export type State = 'up-to-date' | 'stale-snippet' | 'stale-claim' | 'broken';
 
@@ -785,4 +787,92 @@ export async function ls(project: Project): Promise<RefIndex> {
 			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([ref, locations]) => ({ ref, locations }))
 	};
+}
+
+export type SuggestEntry = {
+	doc: string;
+	line: number;
+	identifier: string;
+	/** anchors the identifier could reference: file#symbol or file#@region */
+	refs: string[];
+};
+
+/**
+ * Coverage gap-finder. docref tells you when an existing anchor drifts; this
+ * surfaces the opposite blind spot — prose that names a resolvable code
+ * identifier but sits in no claim or snippet, a *candidate unanchored claim*.
+ * It indexes every symbol and region marker in the `[anchors]` file set, then
+ * scans each document's prose (outside fenced code and outside existing
+ * references) for inline-code identifiers that match the index. A heuristic and
+ * informational: it never gates, and a human decides whether each candidate is
+ * really a claim worth anchoring.
+ */
+export async function suggest(project: Project): Promise<{ suggestions: SuggestEntry[] }> {
+	const symbols = new Map<string, string[]>(); // leaf name -> [file#path]
+	const regions = new Map<string, string[]>(); // region name -> [file#@name]
+	const add = (m: Map<string, string[]>, key: string, ref: string) => {
+		const list = m.get(key) ?? [];
+		if (!list.includes(ref)) list.push(ref);
+		m.set(key, list);
+	};
+
+	for (const file of await anchorFiles(project)) {
+		let text: string;
+		try {
+			text = readFileSync(join(project.root, file), 'utf8');
+		} catch {
+			continue;
+		}
+		if (/\u0000/.test(text)) continue; // binary
+		for (const name of scanRegions(text).regions.keys()) add(regions, name, `${file}#@${name}`);
+		if (!languageForFile(file)) continue;
+		try {
+			for (const d of await listDeclarations(text, file)) {
+				add(symbols, d.path[d.path.length - 1]!, `${file}#${d.path.join('.')}`);
+			}
+		} catch {
+			// unsupported language or parse failure: regions still indexed
+		}
+	}
+
+	const IDENT = /^[A-Za-z_$][\w$.-]*$/;
+	const suggestions: SuggestEntry[] = [];
+	for (const doc of await docFiles(project)) {
+		const text = readFileSync(join(project.root, doc), 'utf8');
+		const covered = referencedLines(text);
+		const lines = text.split('\n');
+		const seen = new Set<string>();
+		let inFence = false;
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]!;
+			if (/^\s*(`{3,}|~{3,})/.test(line)) {
+				inFence = !inFence;
+				continue;
+			}
+			if (inFence || covered.has(i + 1)) continue;
+			for (const m of line.matchAll(/`([^`\n]+)`/g)) {
+				const token = m[1]!.replace(/^@/, '').trim();
+				if (!IDENT.test(token)) continue;
+				const refs = [...(symbols.get(token) ?? []), ...(regions.get(token) ?? [])];
+				const key = `${i + 1}\0${token}`;
+				// only an UNAMBIGUOUS match (one anchor in the tree) — which is also
+				// exactly what `#token` would resolve to, so it is anchorable as
+				// written. Ambiguous names (a leaf in several files) are noise.
+				if (refs.length === 1 && !seen.has(key)) {
+					seen.add(key);
+					suggestions.push({ doc, line: i + 1, identifier: token, refs });
+				}
+			}
+		}
+	}
+	return { suggestions };
+}
+
+/** Lines (1-based) inside an existing claim or snippet — already anchored. */
+function referencedLines(text: string): Set<number> {
+	const covered = new Set<number>();
+	for (const c of scanMarkdown(text).references) {
+		for (let l = c.openLine; l <= c.closeLine; l++) covered.add(l);
+	}
+	return covered;
 }

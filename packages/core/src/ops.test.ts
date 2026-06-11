@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadProject } from './config';
-import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode } from './ops';
+import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode, suggest } from './ops';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
 
 // Integration contract for the operations (tooling.md section 1 against the
@@ -661,5 +661,49 @@ describe('cross-repo: lock, update, pinned resolution', () => {
 		const evil2 = tmp();
 		write(evil2, 'docref.toml', '[repos.lib]\nurl = "file:///tmp/x"\nref = "--upload-pack=touch /tmp/y"\n');
 		expect(() => loadProject(evil2)).toThrow(/unsafe git ref/);
+	});
+});
+
+describe('suggest: candidate unanchored claims', () => {
+	it('flags prose naming a resolvable symbol, but not anchored or unrelated mentions', async () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[anchors]\nallow-unused = true\n');
+		write(root, 'src/lib.ts', 'export function greet(n){return n}\nexport function farewell(n){return n}\n');
+		write(
+			root,
+			'docs/x.md',
+			[
+				'# Doc',
+				'',
+				'The `greet` helper returns a greeting.', // unanchored mention -> suggest
+				'',
+				'<!-- docref: begin src=src/lib.ts#farewell -->',
+				'The `farewell` helper is documented here.', // inside a claim -> not suggested
+				'<!-- docref: end -->',
+				'',
+				'Some prose about `nothing` in particular.', // no such symbol -> not suggested
+				'',
+				'```ts',
+				'`greet` in a code fence is not prose', // inside a fence -> not suggested
+				'```',
+				''
+			].join('\n')
+		);
+
+		const { suggestions } = await suggest(loadProject(root));
+		expect(suggestions).toEqual([
+			{ doc: 'docs/x.md', line: 3, identifier: 'greet', refs: ['src/lib.ts#greet'] }
+		]);
+	});
+
+	it('also matches region markers by name', async () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[anchors]\nallow-unused = true\n');
+		write(root, 'src/q.sql', '-- docref: begin tenant-scope\nWHERE tenant = $1\n-- docref: end tenant-scope\n');
+		write(root, 'docs/y.md', '# Y\n\nThe `tenant-scope` clause isolates tenants.\n');
+		const { suggestions } = await suggest(loadProject(root));
+		expect(suggestions).toEqual([
+			{ doc: 'docs/y.md', line: 3, identifier: 'tenant-scope', refs: ['src/q.sql#@tenant-scope'] }
+		]);
 	});
 });

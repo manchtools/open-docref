@@ -37,6 +37,10 @@ under its own heading and noted in the relevant document under [docs/](docs/).
 
 ### Added
 
+- `docref suggest`: a coverage gap-finder. It indexes every symbol and region
+  in the `[anchors]` file set and flags prose (inline-code identifiers, outside
+  fences and existing references) that resolves to exactly one anchor but isn't
+  claimed — candidate unanchored claims, the inverse of drift detection.
 - VS Code reference autocomplete: typing a `docref=` or `src=` value in a
   markdown file completes the file path, then the symbol or `@region` inside
   it, and inserts the `:sha` already computed (multi-source claims complete the

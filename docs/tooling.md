@@ -144,6 +144,21 @@ referencing side's scheduled `docref update --check` instead. A push
 notification mechanism (registry or webhook) is possible later but out
 of scope.
 
+### `docref suggest [--json]`
+
+<!-- docref: begin src=packages/core/src/ops.ts#suggest:e8a9644b -->
+
+The coverage gap-finder, the inverse of drift: `check` tells you when an
+existing anchor goes stale; `suggest` surfaces prose that *should* be a claim
+and isn't. It indexes every symbol and region marker in the `[anchors]` file
+set, then scans each document's prose — outside fenced code and outside
+existing references — for an inline-code identifier that resolves to exactly
+one anchor. Each hit is a candidate unanchored claim: the document, the line,
+the identifier, and the ref it would carry. Heuristic and informational (always
+exit `0`); the reader decides whether the prose is really a claim worth pinning.
+
+<!-- docref: end -->
+
 ### `docref ls [--json]`
 
 <!-- docref: begin src=packages/core/src/ops.ts#ls:ac543594 -->

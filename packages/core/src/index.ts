@@ -32,6 +32,8 @@ export {
 	resolveReference,
 	exitCode,
 	anchorFiles,
+	suggest,
+	type SuggestEntry,
 	type ClaimDriftEntry,
 	type UnusedAnchor,
 	type AnchorEntry,

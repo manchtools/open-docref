@@ -22,6 +22,7 @@ import {
 	claimBlockText,
 	snippetFenceText,
 	exitCode,
+	suggest,
 	type Report,
 	type ReportEntry
 } from '@open-docref/core';
@@ -41,6 +42,7 @@ commands:
          --check              dry run: report drift, write nothing
   diff [paths...]             what changed since each stale claim was approved
   affected --since <rev>      references endangered by changes since <rev>
+  suggest                     prose that names anchorable code but isn't anchored
   ls                          the reverse index: refs and their locations
   claim <ref...>              print a paste-ready claim block, shas computed
   snippet <ref>               print a paste-ready materialized snippet
@@ -165,6 +167,17 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 					out:
 						result.entries.map((e) => `${e.reason}  ${e.doc}:${e.line}  ${e.ref}`).join('\n') ||
 						'no references affected'
+				};
+			}
+			case 'suggest': {
+				const result = await suggest(project());
+				if (json) return { code: 0, out: JSON.stringify(result, null, 2) };
+				return {
+					code: 0,
+					out:
+						result.suggestions
+							.map((s) => `${s.doc}:${s.line}  ${s.identifier}  -> ${s.refs.join(', ')}`)
+							.join('\n') || 'no unanchored references found'
 				};
 			}
 			case 'diff': {
