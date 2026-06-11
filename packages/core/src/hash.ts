@@ -3,9 +3,11 @@
 // formatter churn never invalidates a hash and token changes always do.
 import { createHash } from 'node:crypto';
 
-// \s in JS regexes covers Unicode White_Space except U+0085 (NEL), which
-// must be added by hand to honor "every White_Space code point".
-const WHITESPACE = /[\s]+/gu;
+// \s in JS regexes covers Unicode White_Space except U+0085 (NEL), so NEL
+// is added explicitly. The escape is deliberate: a literal NEL here would be
+// an invisible byte any editor or formatter could silently strip, which would
+// change every stored hash. Written as \u0085, the intent survives reformatting.
+const WHITESPACE = /[\s\u0085]+/gu;
 
 export function stripWhitespace(content: string): string {
 	return content.replace(WHITESPACE, '');

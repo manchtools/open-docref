@@ -9,7 +9,7 @@ import { contentHash, shortHash, stripWhitespace, hashesMatch } from './hash';
 describe('stripWhitespace', () => {
 	it('removes every White_Space code point, including exotic ones', () => {
 		// space, tab, LF, CR, NBSP, NEL, ideographic space, thin space
-		expect(stripWhitespace('a b\tc\nd\re fg　h i')).toBe('abcdefghi');
+		expect(stripWhitespace('a b\tc\nd\re\u00a0f\u0085g\u3000h\u2009i')).toBe('abcdefghi');
 	});
 
 	it('keeps non-whitespace intact, including unicode identifiers', () => {
