@@ -14,7 +14,8 @@ import {
 	type SidebarNode,
 	isRelevantChange,
 	statusText,
-	refCompletionContext
+	refCompletionContext,
+	pathCompletionsFromFiles
 } from './logic';
 
 // Contract for the extension's decision logic (tooling.md section 3). The
@@ -415,5 +416,36 @@ describe('refCompletionContext: autocomplete inside a docref reference', () => {
 
 	it('uses only the text before the cursor', () => {
 		expect(ctx('```ts docref=src/li|b.ts#x more')).toEqual({ phase: 'path', partial: 'src/li' });
+	});
+});
+
+describe('pathCompletionsFromFiles: completion scoped to the anchorable files', () => {
+	const files = ['src/lib.ts', 'src/lib/util.ts', 'src/main.ts', 'docs/x.md', 'README.md'];
+
+	it('lists top-level entries at the root, directories first', () => {
+		expect(pathCompletionsFromFiles(files, '')).toEqual([
+			{ name: 'docs', isDir: true },
+			{ name: 'src', isDir: true },
+			{ name: 'README.md', isDir: false }
+		]);
+	});
+
+	it('descends into a directory and dedupes the next segment', () => {
+		expect(pathCompletionsFromFiles(files, 'src/')).toEqual([
+			{ name: 'lib', isDir: true }, // from src/lib/util.ts
+			{ name: 'lib.ts', isDir: false },
+			{ name: 'main.ts', isDir: false }
+		]);
+	});
+
+	it('filters by the partial base, case-insensitively', () => {
+		expect(pathCompletionsFromFiles(files, 'src/LI')).toEqual([
+			{ name: 'lib', isDir: true },
+			{ name: 'lib.ts', isDir: false }
+		]);
+	});
+
+	it('offers nothing outside the anchorable set (e.g. node_modules)', () => {
+		expect(pathCompletionsFromFiles(files, 'node_modules/')).toEqual([]);
 	});
 });

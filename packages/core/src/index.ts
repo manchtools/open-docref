@@ -31,6 +31,7 @@ export {
 	remove,
 	resolveReference,
 	exitCode,
+	anchorFiles,
 	type ClaimDriftEntry,
 	type UnusedAnchor,
 	type AnchorEntry,

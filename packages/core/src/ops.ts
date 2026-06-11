@@ -692,7 +692,7 @@ function withoutFences(text: string): string {
 	return lines.join('\n');
 }
 
-async function anchorFiles(project: Project): Promise<string[]> {
+export async function anchorFiles(project: Project): Promise<string[]> {
 	let files = await glob(project.anchors.include, {
 		cwd: project.root,
 		ignore: project.anchors.exclude

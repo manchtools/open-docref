@@ -471,3 +471,33 @@ export function refCompletionContext(line: string, character: number): RefComple
 		partial: region ? frag.slice(1) : frag
 	};
 }
+
+/**
+ * Path-phase completion derived from the project's anchorable file list (the
+ * `[anchors]` include/exclude scope), not the raw filesystem — so completion
+ * offers exactly what can be referenced and honors the toml. Given those files
+ * and the partial path typed, returns the distinct next path segment under it:
+ * a directory to descend into, or a file to reference. Directories first, then
+ * files, each alphabetical.
+ */
+export function pathCompletionsFromFiles(
+	files: string[],
+	partial: string
+): { name: string; isDir: boolean }[] {
+	const slash = partial.lastIndexOf('/');
+	const dir = slash === -1 ? '' : partial.slice(0, slash + 1);
+	const base = (slash === -1 ? partial : partial.slice(slash + 1)).toLowerCase();
+	const seen = new Map<string, boolean>(); // next segment -> isDir
+	for (const f of files) {
+		if (!f.startsWith(dir)) continue;
+		const rest = f.slice(dir.length);
+		const cut = rest.indexOf('/');
+		const isDir = cut !== -1;
+		const name = isDir ? rest.slice(0, cut) : rest;
+		if (!name || !name.toLowerCase().startsWith(base)) continue;
+		if (!seen.has(name)) seen.set(name, isDir);
+	}
+	return [...seen.entries()]
+		.map(([name, isDir]) => ({ name, isDir }))
+		.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
+}

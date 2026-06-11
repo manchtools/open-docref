@@ -2,7 +2,7 @@
 // Everything that decides or formats lives in logic.ts (unit-tested);
 // this file only moves data between the core and the editor.
 import * as vscode from 'vscode';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
 	configureWasm,
@@ -26,6 +26,7 @@ import {
 	scanRegions,
 	extractRegion,
 	contentHash,
+	anchorFiles,
 	type Project,
 	type Report,
 	type RefIndex,
@@ -45,51 +46,27 @@ import {
 	isRelevantChange,
 	statusText,
 	refCompletionContext,
+	pathCompletionsFromFiles,
 	type Leader,
 	type SidebarNode
 } from './logic';
 
-const COMPLETION_NOISE = new Set([
-	'node_modules',
-	'.git',
-	'.svelte-kit',
-	'dist',
-	'build',
-	'out',
-	'coverage',
-	'target'
-]);
-
-/** File/directory items for the path phase of a docref reference. */
-function pathCompletions(root: string, partial: string, range: vscode.Range): vscode.CompletionItem[] {
-	const slash = partial.lastIndexOf('/');
-	const dir = slash === -1 ? '' : partial.slice(0, slash + 1);
-	const base = (slash === -1 ? partial : partial.slice(slash + 1)).toLowerCase();
-	let entries;
-	try {
-		entries = readdirSync(join(root, dir), { withFileTypes: true });
-	} catch {
-		return [];
-	}
-	const items: vscode.CompletionItem[] = [];
-	for (const e of entries) {
-		if (e.name.startsWith('.') || COMPLETION_NOISE.has(e.name)) continue;
-		if (!e.name.toLowerCase().startsWith(base)) continue;
-		if (e.isDirectory()) {
-			const item = new vscode.CompletionItem(e.name + '/', vscode.CompletionItemKind.Folder);
-			item.insertText = e.name + '/';
-			item.range = range;
-			// drill into the next level immediately
-			item.command = { command: 'editor.action.triggerSuggest', title: '' };
-			items.push(item);
-		} else if (e.isFile()) {
-			const item = new vscode.CompletionItem(e.name, vscode.CompletionItemKind.File);
-			item.insertText = e.name; // then type `#` (a trigger) for a fragment
-			item.range = range;
-			items.push(item);
-		}
-	}
-	return items;
+/**
+ * File/directory items for the path phase, scoped to the project's anchorable
+ * files (the `[anchors]` include/exclude in docref.toml), so completion offers
+ * exactly what can be referenced rather than the raw filesystem.
+ */
+function pathCompletions(files: string[], partial: string, range: vscode.Range): vscode.CompletionItem[] {
+	return pathCompletionsFromFiles(files, partial).map(({ name, isDir }) => {
+		const item = new vscode.CompletionItem(
+			isDir ? name + '/' : name,
+			isDir ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.File
+		);
+		item.insertText = isDir ? name + '/' : name; // a file: then type `#` for a fragment
+		item.range = range;
+		if (isDir) item.command = { command: 'editor.action.triggerSuggest', title: '' };
+		return item;
+	});
 }
 
 /**
@@ -148,6 +125,7 @@ async function fragmentCompletions(
 let report: Report | null = null;
 let index: RefIndex | null = null;
 let anchorIndex: AnchorsResult | null = null;
+let anchorFileList: string[] = []; // the [anchors] scope, for path completion
 
 function workspaceRoot(): string | null {
 	return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
@@ -329,6 +307,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			report = await check(p);
 			index = await ls(p);
 			anchorIndex = await anchors(p);
+			anchorFileList = await anchorFiles(p);
 		} catch (e) {
 			void vscode.window.showErrorMessage(`docref: ${(e as Error).message}`);
 			return;
@@ -516,8 +495,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	// symbol or @region inside it, with the :sha computed and attached inline.
 	const completionProvider: vscode.CompletionItemProvider = {
 		async provideCompletionItems(doc, position) {
+			const p = project();
 			const root = workspaceRoot();
-			if (!root) return;
+			if (!p || !root) return;
 			const ctx = refCompletionContext(doc.lineAt(position.line).text, position.character);
 			if (!ctx || ctx.alias) return; // cross-repo file/symbol listing is not offered
 			const word =
@@ -528,9 +508,18 @@ export function activate(context: vscode.ExtensionContext): void {
 				position.line,
 				position.character
 			);
-			return ctx.phase === 'path'
-				? pathCompletions(root, ctx.partial, range)
-				: await fragmentCompletions(root, ctx.path, ctx.kind, range);
+			if (ctx.phase === 'path') {
+				// populated by rescan; fetch once if completion fires first
+				if (anchorFileList.length === 0) {
+					try {
+						anchorFileList = await anchorFiles(p);
+					} catch {
+						/* leave empty */
+					}
+				}
+				return pathCompletions(anchorFileList, ctx.partial, range);
+			}
+			return await fragmentCompletions(root, ctx.path, ctx.kind, range);
 		}
 	};
 
