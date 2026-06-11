@@ -34,6 +34,14 @@ jobs:
       - name: Build CLI and extension
         run: bun run build
 
+      # Fast is a feature: a large project (~4800 references) must check and
+      # refresh under one second on the shipped binary. The algorithmic guard
+      # (parse once per file, not per reference) is in the contract suite.
+      - name: Performance gate (binary, under 1s)
+        run: |
+          bun run build:bin
+          bun run bench
+
       # Dogfood: the tool gates its own repository. A broken or stale
       # reference in the docs fails the build, exactly as it would for a
       # consumer.

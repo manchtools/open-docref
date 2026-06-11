@@ -247,6 +247,16 @@ const COLLECTORS: Record<LanguageId, (s: string, n: Node, st: string[], o: Decl[
 const declCache = new Map<string, Decl[]>();
 const DECL_CACHE_MAX = 256;
 
+// Counters behind the performance-regression guard (perf.test.ts): a parse is
+// the expensive operation, and the invariant is "once per unique file, never
+// once per reference". Also a foundation for a future `--stats`.
+let parseCount = 0;
+let cacheHitCount = 0;
+
+export function symbolCacheStats(): { parses: number; hits: number; size: number } {
+	return { parses: parseCount, hits: cacheHitCount, size: declCache.size };
+}
+
 export async function listDeclarations(source: string, file: string): Promise<Decl[]> {
 	const lang = languageForFile(file);
 	if (!lang) {
@@ -258,6 +268,7 @@ export async function listDeclarations(source: string, file: string): Promise<De
 	const key = `${lang.id}\0${createHash('sha256').update(source, 'utf8').digest('hex')}`;
 	const hit = declCache.get(key);
 	if (hit) {
+		cacheHitCount++;
 		declCache.delete(key); // refresh recency
 		declCache.set(key, hit);
 		return hit;
@@ -271,6 +282,7 @@ export async function listDeclarations(source: string, file: string): Promise<De
 	} finally {
 		tree.delete();
 	}
+	parseCount++;
 	declCache.set(key, out);
 	if (declCache.size > DECL_CACHE_MAX) {
 		const oldest = declCache.keys().next().value;

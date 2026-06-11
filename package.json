@@ -12,6 +12,7 @@
 		"build": "bun run build:cli && bun run build:ext",
 		"build:cli": "bun build packages/cli/src/main.ts --target=node --outfile=packages/cli/dist/docref.js",
 		"build:bin": "bun build --compile packages/cli/src/standalone.ts --outfile packages/cli/dist/docref",
+		"bench": "node scripts/bench.mjs",
 		"build:ext": "esbuild packages/vscode/src/extension.ts --bundle --format=cjs --platform=node --external:vscode --external:tree-sitter-wasms --define:import.meta.url=__importMetaUrl --banner:js=\"var __importMetaUrl = require('url').pathToFileURL(__filename).href;\" --log-override:empty-import-meta=silent --outfile=packages/vscode/dist/extension.cjs && node scripts/copy-ext-wasm.mjs"
 	},
 	"devDependencies": {
