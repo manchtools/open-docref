@@ -26,6 +26,11 @@ import {
 	type ReportEntry
 } from '@open-docref/core';
 
+// Single source of truth for the version, pinned to package.json by a test
+// (main.test.ts) so a release bump cannot desync them. Read as a constant so
+// it survives bundling and `bun build --compile` without a JSON import.
+export const VERSION = '0.1.0';
+
 const USAGE = `usage: docref <command> [options]
 
 commands:
@@ -106,6 +111,9 @@ function renderReport(report: Report, json: boolean): string {
 
 export async function run(argv: string[], cwd: string): Promise<{ code: number; out: string }> {
 	const args = [...argv];
+	if (popFlag(args, '--version') || popFlag(args, '-v') || args[0] === 'version') {
+		return { code: 0, out: VERSION };
+	}
 	const json = popFlag(args, '--json');
 	const checkOnly = popFlag(args, '--check');
 	const since = popValue(args, '--since');

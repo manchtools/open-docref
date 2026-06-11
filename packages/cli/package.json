@@ -1,40 +1,10 @@
 {
 	"name": "open-docref",
 	"version": "0.1.0",
+	"private": true,
 	"type": "module",
-	"description": "Keep documentation anchored to the code it describes. Markdown references code by symbol or region with a content hash; drift goes stale loudly in CI, in the editor, and in JSON for agents.",
-	"keywords": [
-		"documentation",
-		"docs-as-code",
-		"drift",
-		"code-reference",
-		"tree-sitter",
-		"cli",
-		"markdown"
-	],
-	"license": "MIT",
-	"author": "manchtools",
-	"homepage": "https://github.com/manchtools/open-docref#readme",
-	"bugs": "https://github.com/manchtools/open-docref/issues",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/manchtools/open-docref.git",
-		"directory": "packages/cli"
-	},
+	"description": "Keep documentation anchored to the code it describes.",
 	"bin": {
 		"docref": "./dist/docref.js"
-	},
-	"files": [
-		"dist"
-	],
-	"engines": {
-		"node": ">=18"
-	},
-	"scripts": {
-		"prepack": "bun build src/main.ts --target=node --outfile=dist/docref.js"
-	},
-	"dependencies": {
-		"tree-sitter-wasms": "^0.1.12",
-		"web-tree-sitter": "^0.25.10"
 	}
 }

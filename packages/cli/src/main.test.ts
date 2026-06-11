@@ -1,13 +1,29 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { symlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { run, isMainEntry } from './main';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { run, isMainEntry, VERSION } from './main';
 import { tmp, write, read } from '../../core/src/testutil';
 
 // CLI contract (tooling.md section 1): exit 0 all up to date, 1 stale
 // present, 2 broken or config/usage error. --json emits the machine
 // report. approve demands explicit paths; affected demands --since.
+
+describe('version', () => {
+	const pkgVersion = JSON.parse(
+		readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')
+	).version as string;
+
+	it('VERSION is the single source of truth, matching package.json', () => {
+		// pins the constant to the manifest so a release bump cannot desync them
+		expect(VERSION).toBe(pkgVersion);
+	});
+
+	it('prints the version with --version and -v, exit 0', async () => {
+		expect(await run(['--version'], process.cwd())).toEqual({ code: 0, out: pkgVersion });
+		expect(await run(['-v'], process.cwd())).toEqual({ code: 0, out: pkgVersion });
+	});
+});
 
 let cacheDir: string;
 beforeAll(() => {

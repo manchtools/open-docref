@@ -14,14 +14,24 @@ let inited: Promise<void> | null = null;
 const languages = new Map<string, Promise<Language>>();
 const parsers = new Map<string, Parser>();
 
-export type WasmConfig = { runtimeWasm: string; grammarsDir: string };
+// A bundled host points the resolver at explicit wasm locations. Two forms,
+// because the layout differs: an extension ships the grammars in one directory
+// under canonical `tree-sitter-<id>.wasm` names (grammarsDir); a compiled
+// single binary embeds them and gets back hashed, scattered paths, so it
+// supplies an explicit per-id resolver (grammar). grammar wins when both are
+// given.
+export type WasmConfig = {
+	runtimeWasm: string;
+	grammarsDir?: string;
+	grammar?: (id: string) => string;
+};
 let wasmConfig: WasmConfig | null = null;
 
 /**
  * Point the resolver at explicit wasm locations. Bundled hosts (the
- * VSCode extension) ship the wasm files and MUST call this before any
- * symbol resolution: inside a bundle neither import.meta.url nor a
- * resolving require exists, so node_modules lookup is impossible.
+ * VSCode extension, a compiled binary) ship the wasm files and MUST call
+ * this before any symbol resolution: inside a bundle neither import.meta.url
+ * nor a resolving require exists, so node_modules lookup is impossible.
  * Pass null to restore the default package-based resolution.
  */
 export function configureWasm(config: WasmConfig | null): void {
@@ -48,9 +58,9 @@ function runtimeWasmPath(name: string): string {
 
 function grammarWasmPath(wasm: string): string {
 	const file = `tree-sitter-${wasm}.wasm`;
-	return wasmConfig
-		? `${wasmConfig.grammarsDir}/${file}`
-		: packageResolve(`tree-sitter-wasms/out/${file}`);
+	if (wasmConfig?.grammar) return wasmConfig.grammar(wasm);
+	if (wasmConfig?.grammarsDir) return `${wasmConfig.grammarsDir}/${file}`;
+	return packageResolve(`tree-sitter-wasms/out/${file}`);
 }
 
 async function parserFor(wasm: string): Promise<Parser> {

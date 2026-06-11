@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findSymbol, listDeclarations } from './symbols';
+import { findSymbol, listDeclarations, configureWasm } from './symbols';
 import { DocrefError } from './errors';
 
 // Contract (format.md section 1, "Symbols"): a symbol fragment names a
@@ -276,6 +276,28 @@ describe('configureWasm', () => {
 		const d = await findSymbol('function f() {}', 'src/a.js', 'f');
 		expect(d.content).toBe('function f() {}');
 		configureWasm(null);
+	});
+
+	it('accepts an explicit per-grammar resolver (the compiled-binary form)', async () => {
+		// A compiled binary embeds the grammars and gets back hashed, scattered
+		// paths, so it supplies `grammar(id)` instead of a `grammarsDir`. tsx is
+		// not loaded by any other test, so this exercises the resolver for real.
+		const { createRequire } = await import('node:module');
+		const { dirname, join } = await import('node:path');
+		const req = createRequire(import.meta.url);
+		const outDir = join(dirname(req.resolve('tree-sitter-wasms/package.json')), 'out');
+
+		configureWasm({
+			runtimeWasm: req.resolve('web-tree-sitter/tree-sitter.wasm'),
+			grammar: (id: string) => join(outDir, `tree-sitter-${id}.wasm`)
+		});
+		try {
+			// JSX forces the tsx grammar; a wrong/ignored resolver fails to load it
+			const d = await findSymbol('export function f() { return <div/>; }', 'src/a.tsx', 'f');
+			expect(d.content).toContain('function f');
+		} finally {
+			configureWasm(null);
+		}
 	});
 });
 
