@@ -194,6 +194,59 @@ describe('python symbols', () => {
 	});
 });
 
+// Contract (format.md section 1): a symbol is a "function, method, class,
+// type, interface, enum, or top-level constant". A local variable inside a
+// function body is none of those, so it must NOT be anchorable — otherwise
+// `#x` collides with same-named locals and resolution is needlessly noisy.
+// Nested *functions* remain addressable (a nested function is still a
+// function; the python `outer.inner` case above pins that intent).
+const SCOPED = `export function outer(n: number): number {
+	const factor = 2;
+	let scratch = 0;
+	function inner(x: number): number {
+		const bias = 1;
+		return x * factor + bias;
+	}
+	return inner(n);
+}
+
+export const factor = 99;
+`;
+
+describe('symbol scope: locals inside function bodies are not symbols', () => {
+	it('does not list local const/let declared inside a function body', async () => {
+		const paths = (await listDeclarations(SCOPED, 'src/a.ts')).map((d) => d.path.join('.'));
+		// the function and its nested function are symbols...
+		expect(paths).toContain('outer');
+		expect(paths).toContain('outer.inner');
+		// ...but the locals are not, at any nesting depth
+		expect(paths).not.toContain('outer.factor');
+		expect(paths).not.toContain('outer.scratch');
+		expect(paths).not.toContain('outer.inner.bias');
+	});
+
+	it('refuses to resolve a local variable as a symbol', async () => {
+		expect(await code(() => findSymbol(SCOPED, 'src/a.ts', 'outer.factor'))).toBe(
+			'symbol-not-found'
+		);
+		expect(await code(() => findSymbol(SCOPED, 'src/a.ts', 'outer.inner.bias'))).toBe(
+			'symbol-not-found'
+		);
+	});
+
+	it('still resolves the top-level const of the same bare name unambiguously', async () => {
+		// `factor` exists as a top-level const and (before the fix) as a local;
+		// with locals excluded the bare name is unique and resolves to the const
+		const d = await findSymbol(SCOPED, 'src/a.ts', 'factor');
+		expect(d.content).toBe('export const factor = 99;');
+	});
+
+	it('keeps a nested function addressable through its parent', async () => {
+		const d = await findSymbol(SCOPED, 'src/a.ts', 'outer.inner');
+		expect(d.content).toContain('function inner(x: number)');
+	});
+});
+
 describe('configureWasm', () => {
 	// Bundled hosts (the VSCode extension) cannot resolve wasm files
 	// through node_modules at runtime; they must be able to point the

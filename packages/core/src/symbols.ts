@@ -114,18 +114,36 @@ const TS_NAMED = new Set([
 	'method_definition'
 ]);
 
+// Bodies that hold locals. A const/let/var inside one of these is a local
+// variable, not a symbol (format.md section 1 lists only top-level constants),
+// so it is not collected. Nested *functions* still are: a nested function is a
+// function, and the python `outer.inner` case pins that intent.
+const FUNCTION_LIKE = new Set([
+	'function_declaration',
+	'generator_function_declaration',
+	'method_definition'
+]);
+
 function collectTsLike(source: string, node: Node, stack: string[], out: Decl[]): void {
+	walkTs(source, node, stack, false, out);
+}
+
+function walkTs(source: string, node: Node, stack: string[], inFn: boolean, out: Decl[]): void {
 	if (TS_NAMED.has(node.type)) {
 		const name = node.childForFieldName('name')?.text;
 		if (name) {
 			decl(source, wrapped(node, ['export_statement']), [...stack, name], out);
+			// recurse to find nested functions and class members; once inside a
+			// function body, descendants are locals and stay excluded
+			const childInFn = inFn || FUNCTION_LIKE.has(node.type);
 			for (const child of node.namedChildren) {
-				if (child) collectTsLike(source, child, [...stack, name], out);
+				if (child) walkTs(source, child, [...stack, name], childInFn, out);
 			}
 			return;
 		}
 	}
 	if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
+		if (inFn) return; // a local inside a function body is not a symbol
 		for (const d of node.namedChildren) {
 			if (d?.type !== 'variable_declarator') continue;
 			const name = d.childForFieldName('name')?.text;
@@ -134,7 +152,7 @@ function collectTsLike(source: string, node: Node, stack: string[], out: Decl[])
 		return;
 	}
 	for (const child of node.namedChildren) {
-		if (child) collectTsLike(source, child, stack, out);
+		if (child) walkTs(source, child, stack, inFn, out);
 	}
 }
 
