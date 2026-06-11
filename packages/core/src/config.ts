@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { DocrefError } from './errors';
+import { assertRev, assertRef, assertUrl } from './gitcache';
 
 export type RepoConfig = { url: string; ref?: string };
 
@@ -50,6 +51,11 @@ export function loadProject(root: string): Project {
 			if (!repo.url) {
 				throw new DocrefError('invalid-config', `repos.${alias} in docref.toml has no url`);
 			}
+			// reject at the boundary: url/ref are handed to the system git, and
+			// an option-shaped or transport::address value would let committed
+			// config execute code (see gitcache validators)
+			assertUrl(repo.url);
+			if (repo.ref !== undefined) assertRef(repo.ref);
 			project.repos[alias] = { url: repo.url, ...(repo.ref ? { ref: repo.ref } : {}) };
 		}
 	}
@@ -62,6 +68,7 @@ export function loadProject(root: string): Project {
 			if (!entry.rev) {
 				throw new DocrefError('invalid-config', `repos.${alias} in docref.lock has no rev`);
 			}
+			assertRev(entry.rev); // a hex commit id, never a git option
 			project.lock[alias] = { rev: entry.rev };
 		}
 	}

@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { loadProject } from './config';
 import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode } from './ops';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
@@ -635,5 +637,29 @@ describe('cross-repo: lock, update, pinned resolution', () => {
 		expect(read(root, 'docs/x.md')).toContain('return true');
 		expect(u2.report.summary.staleClaim).toBe(1);
 		expect(u2.report.summary.staleSnippet).toBe(0);
+	});
+
+	it('fails closed at load on a poisoned lock rev instead of running git on it', () => {
+		const { remote, root } = remoteFixture();
+		// a malicious PR could ship a docref.lock whose rev is a git option;
+		// without validation `git fetch origin --upload-pack=<cmd>` would run
+		// <cmd>. loadProject rejects it before anything touches git.
+		const sentinel = join(root, 'PWNED');
+		write(root, 'docref.lock', `[repos.lib]\nrev = "--upload-pack=touch ${sentinel}"\n`);
+
+		expect(() => loadProject(root)).toThrow(/unsafe git revision/);
+		expect(existsSync(sentinel)).toBe(false); // nothing was executed
+		// the remote still exists and was never reached
+		expect(read(remote, 'src/handler.go')).toContain('func Verify');
+	});
+
+	it('refuses an ext:: url and an option-shaped tracked ref at load', () => {
+		const evil = tmp();
+		write(evil, 'docref.toml', '[repos.lib]\nurl = "ext::sh -c \'touch /tmp/docref-pwned\'"\n');
+		expect(() => loadProject(evil)).toThrow(/unsafe repo url/);
+
+		const evil2 = tmp();
+		write(evil2, 'docref.toml', '[repos.lib]\nurl = "file:///tmp/x"\nref = "--upload-pack=touch /tmp/y"\n');
+		expect(() => loadProject(evil2)).toThrow(/unsafe git ref/);
 	});
 });
