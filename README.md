@@ -55,6 +55,20 @@ still true and approves it.
 5. **Renderer-neutral.** Site generators may opt into rendering badges
    and source links from the metadata, but nothing requires them to.
 
+## Install
+
+The CLI, from npm — Node 18+ (symbol resolution ships as bundled
+WebAssembly grammars, so there is no native build step):
+
+```sh
+npm install -g open-docref      # then: docref check
+# or run it ad hoc, zero install:
+npx open-docref check
+```
+
+The VS Code extension: search **open-docref** in the Marketplace (or on
+[Open VSX](https://open-vsx.org)), or install the `.vsix` from a release.
+
 ## Status
 
 The core library, the CLI, and a first cut of the VSCode extension are
@@ -66,17 +80,8 @@ and in the editor: create-anchor from a selection, the references
 sidebar with live states, drift diagnostics, referenced-by CodeLens,
 and a status-bar counter.
 
-```sh
-bun install
-bun test          # the contract suite
-bun run build     # CLI bundle + extension bundle
-```
-
-To run the extension, open this repo in VSCode and press F5 (launches
-an Extension Development Host on ../open-docs), or symlink
-`packages/vscode` into your `~/.vscode/extensions` (or
-`~/.vscode-oss/extensions`) as `manchtools.open-docref-vscode-0.1.0`
-and restart the editor.
+Building from source and running the extension in a development host are
+covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - [docs/format.md](docs/format.md): the normative format specification
 - [docs/tooling.md](docs/tooling.md): CLI surface, CI patterns, VSCode

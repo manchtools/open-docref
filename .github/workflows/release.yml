@@ -1,0 +1,72 @@
+name: release
+
+# Publishes on a version tag (e.g. v0.1.0). Requires these repository secrets:
+#   NPM_TOKEN   — npm automation token (publishes the `open-docref` CLI)
+#   VSCE_PAT    — VS Code Marketplace personal access token
+#   OVSX_TOKEN  — Open VSX access token
+# A missing token fails only that job; the others still publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test
+      - run: bun run build
+      - run: node packages/cli/dist/docref.js check
+
+  npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      # `npm publish` runs the package's prepack (bun build) to produce the
+      # self-contained bundle before packing.
+      - name: Publish the CLI to npm
+        working-directory: packages/cli
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  vscode:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # vsce/ovsx run the extension's vscode:prepublish (bun run build:ext),
+      # which bundles the extension and copies the tree-sitter wasm into dist.
+      - name: Publish to the VS Code Marketplace
+        working-directory: packages/vscode
+        run: npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Publish to Open VSX
+        working-directory: packages/vscode
+        run: npx --yes ovsx@latest publish --no-dependencies -p "$OVSX_TOKEN"
+        env:
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}

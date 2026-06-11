@@ -39,6 +39,13 @@ under its own heading and noted in the relevant document under [docs/](docs/).
 
 - A continuous-integration workflow that runs the typecheck, the contract
   suite, the build, and a `docref check` of this repository against itself.
+- Distribution packaging. The `open-docref` CLI publishes to npm as a
+  self-contained bundle that declares the tree-sitter WebAssembly runtimes as
+  its own dependencies, and the VS Code extension packages a self-contained
+  `.vsix` (the `web-tree-sitter` runtime and grammar wasm are bundled in, so it
+  resolves nothing through `node_modules`). A tag-triggered release workflow
+  publishes the CLI to npm and the extension to the VS Code Marketplace and
+  Open VSX.
 
 ## [0.1.0] - 2026-06-10
 
