@@ -39,6 +39,20 @@ When `VerifySignature` changes, the snippet refreshes mechanically and
 the claim is flagged for review until a reader confirms the prose is
 still true and approves it.
 
+## Anchors
+
+A reference names a piece of code: a **symbol** (a declaration, found by
+parsing — no marker needed) or a **region** (a span named in the source with
+`docref: begin <name>` / `docref: end <name>`, for sub-symbol slices). The code
+side has its own loud signal, not just the docs:
+
+<!-- docref: begin src=packages/core/src/ops.ts#anchors:7cf8e4bb,packages/core/src/ops.ts#exitCode:926bfd35 -->
+`docref anchors` inventories every region marker and what references it, and a
+marker that nothing references is flagged **not used** — which fails `docref
+check` unless `[anchors] allow-unused = true`. A stranded marker, like a broken
+reference, never passes silently.
+<!-- docref: end -->
+
 ## Design principles
 
 1. **Plain text first.** Every artifact (references, markers, claims,
