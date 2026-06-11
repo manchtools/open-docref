@@ -197,6 +197,8 @@ blocks. No separate format exists.
 hash = lowercase hex sha256( utf8( strip-whitespace( content ) ) )
 ```
 
+<!-- docref: begin src=packages/core/src/hash.ts#stripWhitespace:b0552a8d,packages/core/src/hash.ts#shortHash:67b3653c -->
+
 - `strip-whitespace` removes **every** code point with the Unicode
   `White_Space` property, including newlines. Formatters (Prettier,
   gofmt, indentation churn) therefore never invalidate a hash; only
@@ -206,6 +208,8 @@ hash = lowercase hex sha256( utf8( strip-whitespace( content ) ) )
 - References store the first **8 hex characters**. Longer prefixes are
   accepted when comparing. A collision does not corrupt anything; at
   worst it delays one review prompt.
+
+<!-- docref: end -->
 
 Known accepted blind spot: a change that alters only whitespace, such
 as moving a Python statement into or out of a block by indentation
@@ -266,12 +270,16 @@ rev = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 Every snippet and claim is in exactly one state:
 
+<!-- docref: begin src=packages/core/src/ops.ts#State:18fd84bc -->
+
 | State | Meaning | Resolution |
 |---|---|---|
 | `up-to-date` | anchor resolves, all hashes agree | nothing to do |
 | `stale-snippet` | a snippet whose anchor resolves but whose recorded sha or body disagrees with the anchor | mechanical: `docref refresh` |
 | `stale-claim` | a claim whose anchors resolve but whose recorded shas disagree (or are absent) | judgment: read the prose, fix it if needed, `docref approve` |
 | `broken` | the anchor does not resolve: missing file, unknown symbol, ambiguous symbol, missing region, undeclared alias | author intervention; never auto-fixed |
+
+<!-- docref: end -->
 
 The defining rule of the whole system: **the tool may move anything in
 and out of `stale-snippet` on its own, and may never move anything out

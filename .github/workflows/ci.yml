@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # full history so `docref affected` can diff against the PR base
+          fetch-depth: 0
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -36,3 +39,12 @@ jobs:
       # consumer.
       - name: docref self-check
         run: node packages/cli/dist/docref.js check
+
+      # Informational: on a PR, list the docs endangered by the change.
+      # `affected` always exits 0, so this never blocks; it is a heads-up,
+      # while the self-check above is the gate.
+      - name: docref affected (informational)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node packages/cli/dist/docref.js affected --since "$BASE_SHA"

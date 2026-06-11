@@ -20,10 +20,14 @@ that nothing references fails the gate (opt out with
 `[anchors] allow-unused = true`); unused anchors are always computed
 against the whole project, even for a path-scoped check.
 
+<!-- docref: begin src=packages/core/src/ops.ts#exitCode:926bfd35 -->
+
 - Exit `0`: everything `up-to-date`, no unused anchors.
 - Exit `1`: at least one `stale-snippet`, `stale-claim`, or unused
   anchor.
 - Exit `2`: at least one `broken` reference or a configuration error.
+
+<!-- docref: end -->
 
 `--json` emits the report machine-readably:
 
