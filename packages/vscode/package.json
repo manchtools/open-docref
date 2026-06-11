@@ -5,8 +5,22 @@
 	"version": "0.1.0",
 	"publisher": "manchtools",
 	"license": "MIT",
-	"private": true,
 	"type": "module",
+	"icon": "icon.png",
+	"homepage": "https://github.com/manchtools/open-docref#readme",
+	"bugs": "https://github.com/manchtools/open-docref/issues",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/manchtools/open-docref.git",
+		"directory": "packages/vscode"
+	},
+	"keywords": [
+		"documentation",
+		"docs-as-code",
+		"drift",
+		"markdown",
+		"codelens"
+	],
 	"engines": {
 		"vscode": "^1.90.0"
 	},
@@ -14,6 +28,9 @@
 		"Other"
 	],
 	"main": "./dist/extension.cjs",
+	"scripts": {
+		"vscode:prepublish": "cd ../.. && bun run build:ext"
+	},
 	"activationEvents": [
 		"onStartupFinished"
 	],
@@ -184,10 +201,8 @@
 			}
 		]
 	},
-	"dependencies": {
-		"@open-docref/core": "workspace:*"
-	},
 	"devDependencies": {
+		"@open-docref/core": "workspace:*",
 		"@types/vscode": "^1.90.0"
 	}
 }
