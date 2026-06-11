@@ -41,6 +41,8 @@ open-secret:src/api/handler.go#VerifySignature cross repo, symbol
 config/default.toml                            same repo, whole file
 ```
 
+<!-- docref: begin src=packages/core/src/ref.ts#parseRef:5e6d511d,packages/core/src/resolve.ts#resolveAnchor:9908f20d -->
+
 - **No fragment** means the whole file is the anchor.
 - **No alias** means the containing repository; the ref resolves
   against the working tree.
@@ -50,12 +52,18 @@ config/default.toml                            same repo, whole file
   grammar. They rot on the next edit and would undermine the whole
   design.
 
+<!-- docref: end -->
+
 ### Symbols
+
+<!-- docref: begin src=packages/core/src/symbols.ts#listDeclarations:b9118450 -->
 
 A symbol fragment names a declaration: function, method, class, type,
 interface, enum, or top-level constant. Nesting uses `.`
 (`Server.VerifySignature`). Resolution is structural (tree-sitter
 queries against the parsed file), not textual.
+
+<!-- docref: end -->
 
 <!-- docref: begin src=packages/core/src/symbols.ts#findSymbol:a0e397ed -->
 
@@ -67,11 +75,15 @@ the fix is to use a region marker instead. The tool never guesses.
 
 ### Regions and the `@` sigil
 
+<!-- docref: begin src=packages/core/src/resolve.ts#resolveAnchor:9908f20d -->
+
 The `@` sigil makes the resolver explicit: `#name` is always a symbol
 lookup, `#@name` is always a marker lookup. There is no fallback from
 one to the other. Without the sigil, a deleted marker whose name
 happens to collide with a symbol would silently re-anchor the ref to
 the wrong code; with it, the result is a loud "region not found".
+
+<!-- docref: end -->
 
 ## 2. Region markers (in source files)
 
@@ -131,6 +143,8 @@ func (s *Server) VerifySignature(req *Request) error {
 ```
 ````
 
+<!-- docref: begin src=packages/core/src/markdown.ts#scanMarkdown:cd8ca97a,packages/core/src/markdown.ts#splitShaSuffix:30ec78f1,packages/core/src/markdown.ts#rewriteSnippets:7dc4de8e,packages/core/src/dedent.ts#dedent:1ded282f -->
+
 - The info string is: language word first (CommonMark convention, so
   syntax highlighting works everywhere), then space-separated
   `key=value` attributes in any order. Unknown keys are preserved.
@@ -150,6 +164,8 @@ func (s *Server) VerifySignature(req *Request) error {
   longer hashes to the recorded sha) and overwritten by the next
   refresh.
 
+<!-- docref: end -->
+
 A snippet is *up-to-date* when the anchor's current hash, the
 recorded `:sha`, and the hash of the body all agree. Any disagreement makes
 it *stale-snippet*; see section 5.
@@ -165,6 +181,8 @@ The handler rejects any request whose signature does not cover the
 exact field set, including the target id.
 <!-- docref: end -->
 ```
+
+<!-- docref: begin src=packages/core/src/markdown.ts#scanMarkdown:cd8ca97a,packages/core/src/markdown.ts#approveClaims:546d693e -->
 
 - Claim comments use the same `docref: begin` / `docref: end` grammar
   as region markers. The argument forms differ: a code region takes a
@@ -186,6 +204,8 @@ exact field set, including the target id.
   mechanically. Only the claim's shas require an approval. This is
   how a doc shows the current code *and* keeps a reviewed claim about
   it.
+
+<!-- docref: end -->
 
 HTML comments carry claims deliberately: they are
 invisible on GitHub and in markdown previews, they survive Prettier,
@@ -229,8 +249,12 @@ more.
 
 ### `docref.toml` (authored, committed)
 
+<!-- docref: begin src=packages/core/src/config.ts#loadProject:56a6649b -->
+
 Lives at the root of the repository containing the markdown. Declares
 cross-repo aliases and scan scope:
+
+<!-- docref: end -->
 
 ```toml
 [scan]
@@ -269,11 +293,15 @@ rev = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   deliberate, batched, reviewable event (typically a scheduled CI job).
 
 <!-- docref: end -->
+<!-- docref: begin src=packages/core/src/gitcache.ts#cacheDirFor:e0236b27,packages/core/src/gitcache.ts#ensureCommit:0ee546f2 -->
+
 - The cache is a shallow clone per repository under
   `$XDG_CACHE_HOME/docref/<host>/<owner>/<repo>`, fetched at the locked
   rev. Git is invoked as the system `git`, so existing credentials
   (SSH keys, credential helpers) cover private repositories with no
   extra configuration.
+
+<!-- docref: end -->
 - Because snippet bodies are materialized, **serving or rendering the
   docs never requires access to the referenced repositories**. Only
   `check`, `refresh`, and `update` do.
@@ -301,6 +329,8 @@ of `stale-claim` or `broken` on its own.**
 
 All of the following are hard errors, not warnings:
 
+<!-- docref: begin src=packages/core/src/resolve.ts#resolveAnchor:9908f20d,packages/core/src/symbols.ts#findSymbol:a0e397ed,packages/core/src/regions.ts#scanRegions:5fcc3f83,packages/core/src/ref.ts#parseRef:5e6d511d,packages/core/src/markdown.ts#scanMarkdown:cd8ca97a -->
+
 - a ref whose path does not exist at the resolved rev
 - a symbol fragment matching zero or multiple declarations
 - a region fragment with no matching marker pair
@@ -309,6 +339,8 @@ All of the following are hard errors, not warnings:
   from `docref.lock`
 - a nested claim
 - a malformed reference (unparseable attributes, missing `docref=`/`src=`)
+
+<!-- docref: end -->
 
 ## 9. Renderers (informative)
 

@@ -186,3 +186,60 @@ export function hashesMatch(a: string | undefined, b: string | undefined): boole
 	return la.startsWith(lb) || lb.startsWith(la);
 }
 ```
+
+## Finding the project root
+
+Run from anywhere inside the repository: `docref` walks up to the nearest
+`docref.toml`, falling back to the working directory.
+
+```ts docref=packages/core/src/config.ts#findRoot:371ad98d
+export function findRoot(cwd: string): string {
+	let dir = cwd;
+	for (;;) {
+		if (existsSync(join(dir, 'docref.toml'))) return dir;
+		const parent = dirname(dir);
+		if (parent === dir) return cwd;
+		dir = parent;
+	}
+}
+```
+
+## The editor layer
+
+The VSCode extension is thin wiring over this same core; the decisions and
+formatting it needs live in a `logic.ts` kept free of the editor API so they
+are unit-testable. The status-bar summary, for instance:
+
+```ts docref=packages/vscode/src/logic.ts#statusText:11321715
+export function statusText(report: Report | null): string {
+	if (!report) return 'docref';
+	const s = report.summary;
+	const stale = s.staleSnippet + s.staleClaim;
+	const broken = s.broken + report.errors.length;
+	if (broken > 0) {
+		const parts = [];
+		if (s.broken) parts.push(`${s.broken} broken`);
+		if (report.errors.length) parts.push(`${report.errors.length} error${report.errors.length === 1 ? '' : 's'}`);
+		if (stale) parts.push(`${stale} stale`);
+		return `docref $(error) ${parts.join(', ')}`;
+	}
+	if (stale > 0) return `docref $(warning) ${stale} stale`;
+	if (report.unusedAnchors.length > 0) {
+		return `docref $(warning) ${report.unusedAnchors.length} unused`;
+	}
+	return `docref $(check) ${s.upToDate}`;
+}
+```
+
+"Create anchor" picks a comment leader by language; an unknown language falls
+back to a quick-pick in the extension layer.
+
+```ts docref=packages/vscode/src/logic.ts#commentLeaderFor:ade6eb1c
+export function commentLeaderFor(languageId: string): Leader | null {
+	const line = LINE_LEADERS[languageId];
+	if (line) return { kind: 'line', open: line };
+	const block = BLOCK_LEADERS[languageId];
+	if (block) return { kind: 'block', open: block[0], close: block[1] };
+	return null;
+}
+```
