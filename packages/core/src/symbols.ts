@@ -2,6 +2,7 @@
 // found by parsing with tree-sitter (WASM grammars, so a bare cached
 // checkout needs no project setup). A fragment matches a declaration whose
 // trailing path segments equal it; zero or multiple matches fail closed.
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import { DocrefError } from './errors';
@@ -236,6 +237,16 @@ const COLLECTORS: Record<LanguageId, (s: string, n: Node, st: string[], o: Decl[
 	python: collectPython
 };
 
+// Parsing a file is by far the dominant cost, and a document with many
+// references into the same source would otherwise re-parse it once per
+// reference. Memoize the declaration list, keyed by the language and an EXACT
+// (whitespace-preserving) hash of the source — content-addressed, so an edit
+// is a miss and the cache can never go stale. Bounded LRU so a long-lived host
+// (the extension) cannot grow without limit. Decls are plain data (no live
+// tree-sitter handles), so sharing the array is safe; callers never mutate it.
+const declCache = new Map<string, Decl[]>();
+const DECL_CACHE_MAX = 256;
+
 export async function listDeclarations(source: string, file: string): Promise<Decl[]> {
 	const lang = languageForFile(file);
 	if (!lang) {
@@ -243,6 +254,13 @@ export async function listDeclarations(source: string, file: string): Promise<De
 			'unsupported-language',
 			`symbol resolution is not available for "${file}"; use a region marker instead`
 		);
+	}
+	const key = `${lang.id}\0${createHash('sha256').update(source, 'utf8').digest('hex')}`;
+	const hit = declCache.get(key);
+	if (hit) {
+		declCache.delete(key); // refresh recency
+		declCache.set(key, hit);
+		return hit;
 	}
 	const parser = await parserFor(lang.wasm);
 	const tree = parser.parse(source);
@@ -252,6 +270,11 @@ export async function listDeclarations(source: string, file: string): Promise<De
 		collectorRoot(lang.id, source, tree.rootNode, out);
 	} finally {
 		tree.delete();
+	}
+	declCache.set(key, out);
+	if (declCache.size > DECL_CACHE_MAX) {
+		const oldest = declCache.keys().next().value;
+		if (oldest !== undefined) declCache.delete(oldest);
 	}
 	return out;
 }

@@ -56,7 +56,7 @@ config/default.toml                            same repo, whole file
 
 ### Symbols
 
-<!-- docref: begin src=packages/core/src/symbols.ts#listDeclarations:b9118450 -->
+<!-- docref: begin src=packages/core/src/symbols.ts#listDeclarations:597bd512 -->
 
 A symbol fragment names a declaration: function, method, class, type,
 interface, enum, or top-level constant. Nesting uses `.`

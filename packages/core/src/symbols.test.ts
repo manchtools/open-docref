@@ -101,6 +101,21 @@ describe('typescript symbols', () => {
 		expect(fn?.startLine).toBe(3);
 		expect(fn?.endLine).toBe(5);
 	});
+
+	it('caches per file content-addressed, so an edit is never stale', async () => {
+		// the parse cache is keyed by exact source content; the same path with
+		// changed content must resolve to the NEW declarations, not a hit on the
+		// old list (a path-keyed cache would be a correctness bug here)
+		const names = async (src: string) =>
+			(await listDeclarations(src, 'src/cache-probe.ts')).map((d) => d.path.join('.'));
+		expect(await names('export function alpha() {}')).toEqual(['alpha']);
+		expect(await names('export function beta() {}\nexport const gamma = 1;')).toEqual([
+			'beta',
+			'gamma'
+		]);
+		// re-using the first content is a cache hit and still correct
+		expect(await names('export function alpha() {}')).toEqual(['alpha']);
+	});
 });
 
 const GO = `package api
