@@ -80,6 +80,24 @@ code --install-extension open-docref-vscode-<version>.vsix
 It is intentionally not on the VS Code Marketplace; the `.vsix` is the
 distribution.
 
+## Use in CI
+
+`docref check` is the gate: it exits `1` on stale references and `2` on broken
+ones, so a red job blocks merging drift. Install the binary, then run it — for
+GitHub Actions:
+
+```yaml
+- name: Install docref
+  run: |
+    curl -fsSL https://raw.githubusercontent.com/manchtools/open-docref/main/install.sh | sh
+    echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+- run: docref check
+```
+
+While this repository is private, give the install step a token with access to
+its releases: `… | GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} sh`. Once it is
+public, no token is needed.
+
 ## Status
 
 The core library, the CLI, and a first cut of the VSCode extension are
