@@ -57,9 +57,13 @@ interface, enum, or top-level constant. Nesting uses `.`
 (`Server.VerifySignature`). Resolution is structural (tree-sitter
 queries against the parsed file), not textual.
 
+<!-- docref: begin src=packages/core/src/symbols.ts#findSymbol:a0e397ed -->
+
 If the name matches more than one declaration in the file (overloads,
 re-declarations), resolution **fails closed**: the ref is *broken* and
 the fix is to use a region marker instead. The tool never guesses.
+
+<!-- docref: end -->
 
 ### Regions and the `@` sigil
 
@@ -97,6 +101,8 @@ parsing:
 
 Rules:
 
+<!-- docref: begin src=packages/core/src/regions.ts#scanRegions:5fcc3f83 -->
+
 - Recognition pattern: `docref:\s*(begin|end)\s+([a-z0-9][a-z0-9-]*)`.
 - Names are kebab-case and **unique per file**. A duplicate `begin`
   with the same name in one file is an error.
@@ -105,6 +111,8 @@ Rules:
 - An unmatched `begin` or `end` is an error.
 - The marker lines themselves are **excluded** from extraction and from
   hashing.
+
+<!-- docref: end -->
 
 Symbols need no marker and are the default. Markers are for sub-symbol
 slices (five specific lines inside a function) or for languages and
@@ -250,6 +258,8 @@ rev = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 ### Resolution semantics
 
+<!-- docref: begin src=packages/core/src/resolve.ts#resolveAnchor:9908f20d,packages/core/src/gitcache.ts#gitRevSource:c1e10c7e -->
+
 - **Same-repo refs float.** They resolve against the working tree, so
   drift is visible the moment the code is edited. In CI the working
   tree is the checkout, so the committed tree is what is checked.
@@ -257,6 +267,8 @@ rev = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   checkout at the locked `rev`, so they can never drift silently.
   Drift surfaces when `docref update` advances the pin, which is a
   deliberate, batched, reviewable event (typically a scheduled CI job).
+
+<!-- docref: end -->
 - The cache is a shallow clone per repository under
   `$XDG_CACHE_HOME/docref/<host>/<owner>/<repo>`, fetched at the locked
   rev. Git is invoked as the system `git`, so existing credentials

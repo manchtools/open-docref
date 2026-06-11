@@ -46,3 +46,143 @@ extensions. Anything else still works with a region marker.
 ```ts docref=packages/core/src/languages.ts#LanguageId:67736556
 export type LanguageId = 'typescript' | 'tsx' | 'javascript' | 'go' | 'python';
 ```
+
+## Parsing a reference
+
+The grammar from [format.md](format.md) section 1 is enforced here; anything
+outside it is a hard error and the parser never guesses.
+
+```ts docref=packages/core/src/ref.ts#parseRef:5e6d511d
+export function parseRef(raw: string): Ref {
+	if (!raw) fail(raw, 'empty');
+
+	let rest = raw;
+	let alias: string | undefined;
+	const colon = rest.indexOf(':');
+	if (colon !== -1) {
+		alias = rest.slice(0, colon);
+		rest = rest.slice(colon + 1);
+		if (!ALIAS.test(alias)) fail(raw, `alias "${alias}" must match ${ALIAS}`);
+	}
+
+	let path = rest;
+	let fragment: Fragment | undefined;
+	const hash = rest.indexOf('#');
+	if (hash !== -1) {
+		path = rest.slice(0, hash);
+		const frag = rest.slice(hash + 1);
+		if (!frag) fail(raw, 'empty fragment');
+		if (frag.startsWith('@')) {
+			const name = frag.slice(1);
+			if (!REGION.test(name)) fail(raw, `region name "${name}" must be kebab-case`);
+			fragment = { kind: 'region', name };
+		} else {
+			if (!SYMBOL.test(frag)) {
+				fail(raw, `"${frag}" is not a symbol path (line numbers are not supported; use a region marker)`);
+			}
+			fragment = { kind: 'symbol', name: frag };
+		}
+	}
+
+	if (!path) fail(raw, 'empty path');
+	if (path.includes(' ')) fail(raw, 'paths must not contain spaces');
+	if (path.includes('\\')) fail(raw, 'paths are POSIX (no backslashes)');
+	if (path.startsWith('/')) fail(raw, 'paths are repo-relative (no leading /)');
+	if (path.startsWith('./')) fail(raw, 'paths are repo-relative (no leading ./)');
+	if (path.split('/').some((seg) => seg === '..' || seg === '')) {
+		fail(raw, 'paths must not contain ".." or empty segments');
+	}
+
+	const ref: Ref = { raw, path };
+	if (alias !== undefined) ref.alias = alias;
+	if (fragment !== undefined) ref.fragment = fragment;
+	return ref;
+}
+```
+
+## Region markers
+
+Markers are recognized anywhere in a line, behind any comment leader. Names
+are unique per file; an unmatched or duplicate marker is an error.
+
+```ts docref=packages/core/src/regions.ts#scanRegions:5fcc3f83
+export function scanRegions(source: string): {
+	regions: Map<string, Region>;
+	errors: RegionError[];
+} {
+	const regions = new Map<string, Region>();
+	const open = new Map<string, number>();
+	const errors: RegionError[] = [];
+	const lines = source.split('\n');
+
+	for (let i = 0; i < lines.length; i++) {
+		const m = MARKER.exec(lines[i]!);
+		if (!m) continue;
+		const [, verb, name] = m as unknown as [string, 'begin' | 'end', string];
+		const line = i + 1;
+		if (verb === 'begin') {
+			if (regions.has(name) || open.has(name)) {
+				errors.push({ line, code: 'duplicate-region', message: `region "${name}" begins twice` });
+				continue;
+			}
+			open.set(name, line);
+		} else {
+			const beginLine = open.get(name);
+			if (beginLine === undefined) {
+				errors.push({ line, code: 'unmatched-end', message: `end of "${name}" without a begin` });
+				continue;
+			}
+			open.delete(name);
+			regions.set(name, { beginLine, endLine: line });
+		}
+	}
+
+	for (const [name, line] of open) {
+		errors.push({ line, code: 'unmatched-begin', message: `region "${name}" is never closed` });
+	}
+
+	return { regions, errors };
+}
+```
+
+## Disambiguating the sha suffix
+
+A ref is `[alias:]path[#fragment][:sha]`. The alias separator is the first
+colon, the sha suffix the last, and fragments cannot contain colons, so the
+two never collide — the parser proves which is which.
+
+```ts docref=packages/core/src/markdown.ts#splitShaSuffix:30ec78f1
+export function splitShaSuffix(part: string): { ref: string; sha?: string } {
+	const at = part.lastIndexOf(':');
+	if (at > 0) {
+		const suffix = part.slice(at + 1);
+		if (SHA.test(suffix)) {
+			const bare = part.slice(0, at);
+			try {
+				parseRef(bare);
+				return { ref: bare, sha: suffix.toLowerCase() };
+			} catch {
+				// the colon belonged to the ref itself; validate it whole
+			}
+		}
+	}
+	parseRef(part); // throws on an invalid ref
+	return { ref: part };
+}
+```
+
+## Comparing hashes
+
+References store an 8-hex prefix; a comparison accepts a longer prefix on
+either side and refuses to match on fewer than 8 characters.
+
+```ts docref=packages/core/src/hash.ts#hashesMatch:95849d90
+export function hashesMatch(a: string | undefined, b: string | undefined): boolean {
+	if (!a || !b) return false;
+	const la = a.toLowerCase();
+	const lb = b.toLowerCase();
+	if (la.length < 8 || lb.length < 8) return false;
+	if (!/^[0-9a-f]+$/.test(la) || !/^[0-9a-f]+$/.test(lb)) return false;
+	return la.startsWith(lb) || lb.startsWith(la);
+}
+```

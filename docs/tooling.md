@@ -50,12 +50,18 @@ against the whole project, even for a path-scoped check.
 
 ### `docref refresh [paths...]`
 
+<!-- docref: begin src=packages/core/src/ops.ts#refresh:b1dbd946 -->
+
 Re-extract every snippet in scope and rewrite its body and `:sha`.
 Touches only snippets (the mechanical state); never advances a
 claim's shas. Idempotent. Exit codes as in `check`, evaluated after the
 rewrite, so a repo whose only problems were stale snippets exits `0`.
 
+<!-- docref: end -->
+
 ### `docref approve <paths...>`
+
+<!-- docref: begin src=packages/core/src/ops.ts#approve:81aba3fc -->
 
 Advance the `:sha` suffixes of claims in the given files to the
 anchors' current hashes. This is the judgment step: it must follow a human or
@@ -63,7 +69,11 @@ agent actually reading the prose. It therefore requires explicit
 paths; there is no `--all`. Refuses to approve a claim whose anchor is
 `broken`.
 
+<!-- docref: end -->
+
 ### `docref diff [paths...] [--json]`
+
+<!-- docref: begin src=packages/core/src/ops.ts#diff:07e65e40 -->
 
 For every claim that is not up to date: recover the content the
 approver saw and show it against the anchor's current content as a
@@ -72,6 +82,8 @@ claim stores only the hash): walk the anchored file's history, newest
 first, until a revision's anchor hashes to the recorded sha. The
 drift becomes reviewable in one step instead of two hashes and an
 archaeology session.
+
+<!-- docref: end -->
 
 Informational, always exit `0` (`check` is the gate). Honest limits:
 the approved state must have been committed to be findable; claims
@@ -82,9 +94,13 @@ plus an ordinary `git diff` of the document already shows the change.
 
 ### `docref claim <ref...>` and `docref snippet <ref>`
 
+<!-- docref: begin src=packages/core/src/ops.ts#resolveReference:32eb60dd,packages/core/src/markdown.ts#claimBlockText:c9edcf37,packages/core/src/markdown.ts#snippetFenceText:ba53537f -->
+
 Print paste-ready text with the shas computed: `claim` emits a claim
 block (several refs make one multi-source claim), `snippet` emits a
 fully materialized fence. The shell is the CLI's staging area:
+
+<!-- docref: end -->
 
 ```sh
 docref claim src/lib/server/site.ts#siteConfig >> docs/config.md
@@ -98,9 +114,13 @@ record it later.
 
 ### `docref update [alias...] [--check]`
 
+<!-- docref: begin src=packages/core/src/ops.ts#update:1b0dbfa1 -->
+
 For each alias (default: all): fetch the tracked branch, advance
 `docref.lock` to its tip, refresh all snippets referencing the alias, and
 report every claim that became `stale-claim` under the new rev.
+
+<!-- docref: end -->
 
 `--check` is the dry run: fetch and compare, report what would change,
 write nothing. Exit codes as in `check` against the *new* rev, which
@@ -108,11 +128,15 @@ makes it the right job for scheduled CI (section 2).
 
 ### `docref affected --since <rev> [--json]`
 
+<!-- docref: begin src=packages/core/src/ops.ts#affected:27797135 -->
+
 Map a change to the documents it endangers: diff the working tree (or
 `HEAD`) against `<rev>`, intersect changed line spans with anchor spans
 (symbols, regions, whole files), and list every snippet and claim
 referencing an affected anchor. This is the primary agent entry point and the
 pre-push answer to "which docs do I owe an update?".
+
+<!-- docref: end -->
 
 Same-repo only in v1: a code repository does not know which other
 repositories reference it. Cross-repo drift is surfaced by the
@@ -122,11 +146,17 @@ of scope.
 
 ### `docref ls [--json]`
 
+<!-- docref: begin src=packages/core/src/ops.ts#ls:ac543594 -->
+
 Dump the reverse index: every referenced anchor and everything
 referencing it. The extension's CodeLens and the agent's orientation
 pass both read this.
 
+<!-- docref: end -->
+
 ### `docref anchors [--json]`
+
+<!-- docref: begin src=packages/core/src/ops.ts#anchors:7cf8e4bb -->
 
 The code-side inventory, the reverse of `ls`: scan the source tree for
 every declared region marker and list each with the references to it;
@@ -134,6 +164,8 @@ an anchor with none is flagged **not used**. Marker
 errors (duplicate names, unmatched begin/end) surface here even in
 files nothing references, which `check` alone would never visit. Exit `2` on marker errors, `0` otherwise (an unused anchor is
 information, not a failure).
+
+<!-- docref: end -->
 
 Files are enumerated from the `[anchors]` include/exclude globs in
 `docref.toml` (default: everything), intersected with
