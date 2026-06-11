@@ -50,6 +50,13 @@ under its own heading and noted in the relevant document under [docs/](docs/).
 - `install.sh` (curl-pipe installer that fetches the right binary), the
   `docref self-update` command that replaces the binary in place, and
   `docref --version` / `-v`.
+- A purpose-built CI container image (`ghcr.io/manchtools/open-docref`): the
+  binary plus git on a small Alpine base (~47 MB, multi-arch amd64/arm64), so a
+  consumer's CI runs `docref check` with nothing to install or wire up. The
+  release workflow builds and pushes it on each tag.
+- A performance gate in CI: a deterministic test that the parse cache stays
+  one-parse-per-file, plus a bench that fails if `check` or `refresh` on ~4800
+  references exceeds one second on the binary.
 
 ## [0.1.0] - 2026-06-10
 

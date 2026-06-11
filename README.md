@@ -83,8 +83,29 @@ distribution.
 ## Use in CI
 
 `docref check` is the gate: it exits `1` on stale references and `2` on broken
-ones, so a red job blocks merging drift. Install the binary, then run it — for
-GitHub Actions:
+ones, so a red job blocks merging drift.
+
+### Container image — nothing to install
+
+A purpose-built image (`ghcr.io/manchtools/open-docref`) carries the binary and
+git on a small Alpine base, so a job just runs `docref` against its checkout:
+
+```yaml
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    container: ghcr.io/manchtools/open-docref:latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docref check
+```
+
+Or run it anywhere with Docker —
+`docker run --rm -v "$PWD:/repo" ghcr.io/manchtools/open-docref check` — or copy
+just the binary into your own image:
+`COPY --from=ghcr.io/manchtools/open-docref /usr/local/bin/docref /usr/local/bin/`.
+
+### Install the binary
 
 ```yaml
 - name: Install docref
@@ -94,9 +115,9 @@ GitHub Actions:
 - run: docref check
 ```
 
-While this repository is private, give the install step a token with access to
-its releases: `… | GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} sh`. Once it is
-public, no token is needed.
+While this repository is private, the image and the release assets need a token
+with access: authenticate the pull (or the install step) with
+`${{ secrets.GITHUB_TOKEN }}`. Once it is public, neither needs one.
 
 ## Status
 
