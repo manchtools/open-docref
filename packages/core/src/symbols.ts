@@ -229,12 +229,86 @@ function collectPython(source: string, node: Node, stack: string[], out: Decl[])
 	}
 }
 
+// Data-driven collectors for the remaining languages: a set of "named
+// declaration" node types per grammar. The name is the `name` field, or — for
+// C/C++ — the identifier drilled out of the `declarator`. Nesting falls out of
+// recursing with the declaration's name on the stack, so a method inside a
+// class is `Class.method`.
+function declName(node: Node): string | undefined {
+	const direct = node.childForFieldName('name')?.text;
+	if (direct) return direct;
+	// declarator-based (C/C++): drill to the identifier nearest the top
+	const dtor = node.childForFieldName('declarator');
+	if (dtor) {
+		const queue: Node[] = [dtor];
+		while (queue.length) {
+			const n = queue.shift()!;
+			if (n.type === 'identifier' || n.type === 'field_identifier' || n.type === 'type_identifier') {
+				return n.text;
+			}
+			for (const c of n.namedChildren) if (c) queue.push(c);
+		}
+		return undefined;
+	}
+	// field-less grammars (e.g. kotlin): the name is the first identifier-like
+	// child of the declaration node
+	for (const c of node.namedChildren) {
+		if (c && /(^|_)identifier$/.test(c.type)) return c.text;
+	}
+	return undefined;
+}
+
+function namedCollector(
+	named: Set<string>,
+	wrappers: string[] = []
+): (s: string, n: Node, st: string[], o: Decl[]) => void {
+	const walk = (source: string, node: Node, stack: string[], out: Decl[]): void => {
+		if (named.has(node.type)) {
+			const name = declName(node);
+			if (name) {
+				decl(source, wrapped(node, wrappers), [...stack, name], out);
+				for (const c of node.namedChildren) if (c) walk(source, c, [...stack, name], out);
+				return;
+			}
+		}
+		for (const c of node.namedChildren) if (c) walk(source, c, stack, out);
+	};
+	return walk;
+}
+
+type GenericLanguage = Exclude<LanguageId, 'typescript' | 'tsx' | 'javascript' | 'go' | 'python'>;
+
+const NODE_TYPES: Record<GenericLanguage, string[]> = {
+	rust: ['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition'],
+	java: ['class_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'annotation_type_declaration', 'method_declaration', 'constructor_declaration'],
+	c: ['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
+	cpp: ['function_definition', 'struct_specifier', 'class_specifier', 'enum_specifier', 'union_specifier', 'namespace_definition', 'type_definition'],
+	csharp: ['class_declaration', 'struct_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'namespace_declaration', 'delegate_declaration', 'method_declaration', 'constructor_declaration', 'property_declaration'],
+	ruby: ['method', 'singleton_method', 'class', 'module'],
+	php: ['function_definition', 'method_declaration', 'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration'],
+	swift: ['function_declaration', 'class_declaration', 'protocol_declaration', 'property_declaration'],
+	kotlin: ['function_declaration', 'class_declaration', 'object_declaration', 'property_declaration'],
+	scala: ['function_definition', 'class_definition', 'object_definition', 'trait_definition', 'type_definition', 'val_definition'],
+	bash: ['function_definition']
+};
+
 const COLLECTORS: Record<LanguageId, (s: string, n: Node, st: string[], o: Decl[]) => void> = {
 	typescript: collectTsLike,
 	tsx: collectTsLike,
 	javascript: collectTsLike,
 	go: collectGo,
-	python: collectPython
+	python: collectPython,
+	rust: namedCollector(new Set(NODE_TYPES.rust)),
+	java: namedCollector(new Set(NODE_TYPES.java)),
+	c: namedCollector(new Set(NODE_TYPES.c)),
+	cpp: namedCollector(new Set(NODE_TYPES.cpp)),
+	csharp: namedCollector(new Set(NODE_TYPES.csharp)),
+	ruby: namedCollector(new Set(NODE_TYPES.ruby)),
+	php: namedCollector(new Set(NODE_TYPES.php)),
+	swift: namedCollector(new Set(NODE_TYPES.swift)),
+	kotlin: namedCollector(new Set(NODE_TYPES.kotlin)),
+	scala: namedCollector(new Set(NODE_TYPES.scala)),
+	bash: namedCollector(new Set(NODE_TYPES.bash))
 };
 
 // Parsing a file is by far the dominant cost, and a document with many

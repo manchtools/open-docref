@@ -43,8 +43,24 @@ export function contentHash(content: string): string {
 Structural (tree-sitter) symbol resolution is available for these file
 extensions. Anything else still works with a region marker.
 
-```ts docref=packages/core/src/languages.ts#LanguageId:67736556
-export type LanguageId = 'typescript' | 'tsx' | 'javascript' | 'go' | 'python';
+```ts docref=packages/core/src/languages.ts#LanguageId:2368882f
+export type LanguageId =
+	| 'typescript'
+	| 'tsx'
+	| 'javascript'
+	| 'go'
+	| 'python'
+	| 'rust'
+	| 'java'
+	| 'c'
+	| 'cpp'
+	| 'csharp'
+	| 'ruby'
+	| 'php'
+	| 'swift'
+	| 'kotlin'
+	| 'scala'
+	| 'bash';
 ```
 
 ## Parsing a reference

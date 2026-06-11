@@ -91,14 +91,15 @@ describe('resolveAnchor', () => {
 
 	it('fails closed: symbol ref into an unsupported language', async () => {
 		const root = fixture();
-		write(root, 'src/main.rs', 'fn main() {}\n');
+		// a filetype with no grammar mapping
+		write(root, 'config/schema.txt', 'name = main\n');
 		const src = workingTreeSource(root);
-		expect(await code(() => resolveAnchor(src, parseRef('src/main.rs#main')))).toBe(
+		expect(await code(() => resolveAnchor(src, parseRef('config/schema.txt#main')))).toBe(
 			'unsupported-language'
 		);
 		// regions still work in any language
-		write(root, 'src/lib.rs', '// docref: begin r\nlet x = 1;\n// docref: end r\n');
-		const a = await resolveAnchor(src, parseRef('src/lib.rs#@r'));
+		write(root, 'config/lib.txt', '# docref: begin r\nlet x = 1;\n# docref: end r\n');
+		const a = await resolveAnchor(src, parseRef('config/lib.txt#@r'));
 		expect(a.content).toBe('let x = 1;');
 	});
 });

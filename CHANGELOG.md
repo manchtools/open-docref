@@ -37,6 +37,11 @@ under its own heading and noted in the relevant document under [docs/](docs/).
 
 ### Added
 
+- Symbol resolution for many more languages — Rust, Java, C, C++, C#, Ruby,
+  PHP, Swift, Kotlin, Scala, and Bash join TypeScript, JavaScript, Go, and
+  Python — via a data-driven collector (a set of declaration node types per
+  grammar), so a method in any of them anchors as `file#Class.method` with no
+  region marker.
 - `docref suggest`: a coverage gap-finder. It indexes every symbol and region
   in the `[anchors]` file set and flags prose (inline-code identifiers, outside
   fences and existing references) that resolves to exactly one anchor but isn't

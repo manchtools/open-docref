@@ -137,8 +137,9 @@ with access: authenticate the pull (or the install step) with
 
 The core library, the CLI, and a first cut of the VSCode extension are
 implemented and tested (milestones 1 through 5 of the plan): same-repo
-and cross-repo resolution, symbols (TypeScript, JavaScript, Go, Python)
-and regions, `check`, `refresh`, `approve`, `update`, `affected`,
+and cross-repo resolution, symbols (TypeScript, JavaScript, Go, Python,
+Rust, Java, C, C++, C#, Ruby, PHP, Swift, Kotlin, Scala, Bash)
+and regions, `check`, `refresh`, `approve`, `update`, `affected`, `suggest`,
 `ls`, `anchors`,
 and in the editor: create-anchor from a selection, reference autocomplete
 (path → symbol/region, with the hash attached), the references

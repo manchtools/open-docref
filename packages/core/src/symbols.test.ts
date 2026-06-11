@@ -319,11 +319,36 @@ describe('configureWasm', () => {
 describe('unsupported languages', () => {
 	it('fails closed and names the escape hatch', async () => {
 		try {
-			await findSymbol('fn main() {}', 'src/a.rs', 'main');
+			// a filetype with no grammar mapping (regions are the escape hatch)
+			await findSymbol('some text', 'docs/notes.txt', 'main');
 			expect.unreachable('should have thrown');
 		} catch (e) {
 			expect((e as DocrefError).code).toBe('unsupported-language');
 			expect((e as DocrefError).message).toContain('region');
 		}
 	});
+});
+
+describe('symbol resolution across popular languages', () => {
+	const LANGS: { name: string; file: string; src: string; symbol: string; has: string }[] = [
+		{ name: 'rust', file: 'a.rs', src: 'pub fn greet(name: &str) -> String {\n    format!("hi {name}")\n}\n', symbol: 'greet', has: 'fn greet' },
+		{ name: 'java (class)', file: 'A.java', src: 'class Greeter {\n  String greet(String n) { return "hi" + n; }\n}\n', symbol: 'Greeter', has: 'class Greeter' },
+		{ name: 'java (method)', file: 'A.java', src: 'class Greeter {\n  String greet(String n) { return "hi" + n; }\n}\n', symbol: 'Greeter.greet', has: 'greet' },
+		{ name: 'c', file: 'a.c', src: 'int greet(int n) {\n  return n + 1;\n}\n', symbol: 'greet', has: 'greet' },
+		{ name: 'cpp', file: 'a.cpp', src: 'int compute(int n) {\n  return n * 2;\n}\n', symbol: 'compute', has: 'compute' },
+		{ name: 'csharp', file: 'A.cs', src: 'class Greeter {\n  public string Greet(string n) { return n; }\n}\n', symbol: 'Greeter', has: 'class Greeter' },
+		{ name: 'ruby', file: 'a.rb', src: 'def greet(n)\n  n\nend\n', symbol: 'greet', has: 'def greet' },
+		{ name: 'php', file: 'a.php', src: '<?php\nfunction greet($n) {\n  return $n;\n}\n', symbol: 'greet', has: 'function greet' },
+		{ name: 'swift', file: 'a.swift', src: 'func greet(_ n: String) -> String {\n  return n\n}\n', symbol: 'greet', has: 'func greet' },
+		{ name: 'kotlin', file: 'a.kt', src: 'fun greet(n: String): String {\n  return n\n}\n', symbol: 'greet', has: 'fun greet' },
+		{ name: 'scala', file: 'A.scala', src: 'object G {\n  def greet(n: Int): Int = n\n}\n', symbol: 'greet', has: 'greet' },
+		{ name: 'kotlin (class)', file: 'a.kt', src: 'class Greeter {\n  fun greet(n: String): String { return n }\n}\n', symbol: 'Greeter', has: 'class Greeter' },
+		{ name: 'bash', file: 'a.sh', src: 'greet() {\n  echo "$1"\n}\n', symbol: 'greet', has: 'greet' }
+	];
+	for (const l of LANGS) {
+		it(`resolves a declaration in ${l.name}`, async () => {
+			const d = await findSymbol(l.src, l.file, l.symbol);
+			expect(d.content).toContain(l.has);
+		});
+	}
 });
