@@ -10,7 +10,7 @@ label: Errors & renderers
 
 All of the following are hard errors, not warnings:
 
-<!-- docref: begin src=packages/core/src/resolve.ts#resolveAnchor:9908f20d,packages/core/src/symbols.ts#findSymbol:a0e397ed,packages/core/src/regions.ts#scanRegions:6b2f236c,packages/core/src/ref.ts#parseRef:b54f5326,packages/core/src/markdown.ts#scanMarkdown:d108e8c0 -->
+<!-- docref: begin src=packages/core/src/resolve.ts#resolveAnchor:9908f20d,packages/core/src/symbols.ts#findSymbol:02623a31,packages/core/src/regions.ts#scanRegions:6b2f236c,packages/core/src/ref.ts#parseRef:b54f5326,packages/core/src/markdown.ts#scanMarkdown:d108e8c0 -->
 
 - a ref whose path does not exist at the resolved rev
 - a symbol fragment matching zero or multiple declarations

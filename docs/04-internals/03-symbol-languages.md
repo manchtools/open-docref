@@ -35,13 +35,17 @@ collectors; every other language is data-driven — `namedCollector(types, scope
 where `types` is its declaration node types and `scope` (`functionLike` /
 `valueBindings`) marks which nodes open a function body and which are value
 bindings. So a `const`/`val`/`property` inside a function body is treated as a
-local and never collected, exactly as the TypeScript collector does. Proto is the
-notable case: it anchors messages, enums, services and rpcs, and (because a field
-number or enum value number is the wire contract, the most drift-prone part of a
-schema) message fields and enum values too, so `CreateRequest.shares` is
-addressable.
+local and never collected, exactly as the TypeScript collector does. Fields and
+properties are addressable too: a class field, a struct field, or an
+interface/protocol property resolves as `Type.field`, qualified by its enclosing
+type, because these are slow-moving API surface that documentation names
+constantly. A bare field name shared by two types stays ambiguous and fails
+closed; the qualified form resolves, and an exact top-level name always wins over
+a same-leaf field. Proto goes furthest: a message field or enum value *number* is
+the wire contract, the most drift-prone part of a schema, so `CreateRequest.shares`
+is addressable for that reason as well.
 
-```ts docref=packages/core/src/symbols.ts#COLLECTORS:73c11951
+```ts docref=packages/core/src/symbols.ts#COLLECTORS:ca8a51f1
 const COLLECTORS: Record<LanguageId, Collector> = {
 	typescript: collectTsLike,
 	tsx: collectTsLike,
@@ -49,7 +53,10 @@ const COLLECTORS: Record<LanguageId, Collector> = {
 	go: collectGo,
 	python: collectPython,
 	rust: namedCollector(
-		['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition'],
+		// field_declaration: a struct field is API contract, addressable as
+		// `Struct.field` (the generic walk qualifies it through the struct on the
+		// stack). A function-body local is a let_declaration, not collected.
+		['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition', 'field_declaration'],
 		{ functionLike: ['function_item'], valueBindings: ['const_item', 'static_item'] }
 	),
 	java: namedCollector(
@@ -103,15 +110,17 @@ TypeScript/JavaScript/TSX, Go and Python predate that table and use bespoke
 collectors, so their parsed kinds live in the code below rather than the set
 above:
 
-<!-- docref: begin src=packages/core/src/symbols.ts#TS_NAMED:b733aa56,packages/core/src/symbols.ts#FUNCTION_LIKE:33f379e5,packages/core/src/symbols.ts#walkTs:240cec8f,packages/core/src/symbols.ts#collectGo:be84e903,packages/core/src/symbols.ts#collectPython:31c3f745 -->
+<!-- docref: begin src=packages/core/src/symbols.ts#TS_NAMED:b733aa56,packages/core/src/symbols.ts#FUNCTION_LIKE:33f379e5,packages/core/src/symbols.ts#walkTs:5814db7c,packages/core/src/symbols.ts#collectGo:eced0edd,packages/core/src/symbols.ts#collectPython:ea14a3ae -->
 
 - **TypeScript / JavaScript / TSX:** functions (including generators), classes
-  (including abstract), interfaces, type aliases, enums, methods, and top-level
-  `const`/`let`/`var`, but never a binding declared inside a function body;
-  nested functions stay addressable.
-- **Go:** functions, methods (nested under their receiver type), and `type`,
-  `const` and `var` specs.
-- **Python:** functions and classes, including nested ones (a local binding is
-  not a symbol).
+  (including abstract), interfaces, type aliases, enums, methods, class fields,
+  interface properties, and top-level `const`/`let`/`var`, but never a binding
+  declared inside a function body; nested functions stay addressable.
+- **Go:** functions, methods (nested under their receiver type), `type`, `const`
+  and `var` specs, and a struct's named fields (`Type.field`); an embedded field
+  is a type reference, not a member, and is not collected.
+- **Python:** functions and classes, including nested ones, and class-level
+  attributes (`Class.attr`); a binding inside a function body, including a
+  `self.x` assignment, is not a symbol.
 
 <!-- docref: end -->

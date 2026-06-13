@@ -164,6 +164,10 @@ const TS_NAMED = new Set([
 	'method_definition'
 ]);
 
+// A plain identifier usable as a ref fragment: excludes a private `#field`
+// (the `#` cannot appear in a fragment) and a `[computed]` member name.
+const SIMPLE_NAME = /^[A-Za-z_$][\w$]*$/;
+
 // Bodies that hold locals. A const/let/var inside one of these is a local
 // variable, not a symbol (format.md section 1 lists only top-level constants),
 // so it is not collected. Nested *functions* still are: a nested function is a
@@ -179,6 +183,15 @@ function collectTsLike(source: string, node: Node, stack: string[], out: Decl[])
 }
 
 function walkTs(source: string, node: Node, stack: string[], inFn: boolean, out: Decl[]): void {
+	// A class field or interface property is API contract, addressable as
+	// `Type.field` (qualified by the enclosing type already on the stack). It is
+	// a leaf: collect it but never descend into an initializer, so an arrow-
+	// function field never leaks its locals as symbols.
+	if (node.type === 'public_field_definition' || node.type === 'property_signature') {
+		const name = node.childForFieldName('name')?.text;
+		if (name && SIMPLE_NAME.test(name)) decl(source, node, [...stack, name], out);
+		return;
+	}
 	if (TS_NAMED.has(node.type)) {
 		const name = node.childForFieldName('name')?.text;
 		if (name) {
@@ -214,6 +227,19 @@ function goReceiverType(method: Node): string | undefined {
 	return firstDescendantText(receiver, GO_RECEIVER_TYPES);
 }
 
+// A struct's named fields become `Type.field`. Embedded fields (a bare type,
+// no `name`) and inline anonymous sub-structs are not members and are skipped.
+function collectGoStructFields(source: string, structType: Node, stack: string[], out: Decl[]): void {
+	const list = structType.namedChildren.find((c) => c?.type === 'field_declaration_list');
+	if (!list) return;
+	for (const fd of list.namedChildren) {
+		if (fd?.type !== 'field_declaration') continue;
+		for (const nameNode of fieldChildren(fd, 'name')) {
+			decl(source, fd, [...stack, nameNode.text], out);
+		}
+	}
+}
+
 function collectGo(source: string, node: Node, stack: string[], out: Decl[]): void {
 	switch (node.type) {
 		case 'function_declaration': {
@@ -236,6 +262,15 @@ function collectGo(source: string, node: Node, stack: string[], out: Decl[]): vo
 				if (!spec || !/_spec$/.test(spec.type)) continue;
 				for (const nameNode of fieldChildren(spec, 'name')) {
 					decl(source, node, [...stack, nameNode.text], out);
+					// a struct type's named fields are API contract, addressable as
+					// `Type.field` (like a proto message field); an embedded field has
+					// no `name` and is a type reference, not a member, so it is skipped
+					if (spec.type === 'type_spec') {
+						const t = spec.childForFieldName('type');
+						if (t?.type === 'struct_type') {
+							collectGoStructFields(source, t, [...stack, nameNode.text], out);
+						}
+					}
 				}
 			}
 			return;
@@ -248,7 +283,23 @@ function collectGo(source: string, node: Node, stack: string[], out: Decl[]): vo
 }
 
 function collectPython(source: string, node: Node, stack: string[], out: Decl[]): void {
-	if (node.type === 'function_definition' || node.type === 'class_definition') {
+	if (node.type === 'class_definition') {
+		const name = node.childForFieldName('name')?.text;
+		if (name) {
+			decl(source, wrapped(node, ['decorated_definition']), [...stack, name], out);
+			const body = node.childForFieldName('body');
+			if (body) {
+				const inner = [...stack, name];
+				for (const stmt of body.namedChildren) {
+					if (!stmt) continue;
+					collectPyClassAttr(source, stmt, inner, out); // a direct class-level attribute
+					collectPython(source, stmt, inner, out); // methods and nested classes
+				}
+			}
+			return;
+		}
+	}
+	if (node.type === 'function_definition') {
 		const name = node.childForFieldName('name')?.text;
 		if (name) {
 			decl(source, wrapped(node, ['decorated_definition']), [...stack, name], out);
@@ -259,6 +310,21 @@ function collectPython(source: string, node: Node, stack: string[], out: Decl[])
 	}
 	for (const child of node.namedChildren) {
 		if (child) collectPython(source, child, stack, out);
+	}
+}
+
+// A class-level attribute (`retry: int = 3`, `label = "x"`) is API contract,
+// addressable as `Class.attr`. Only a simple-identifier target declared
+// DIRECTLY in the class body counts: a `self.x` set inside a method is reached
+// through that method's body (never here), and a tuple target is not a single
+// named attribute. This matches the "class-level only, no __init__ heuristic"
+// scope decision.
+function collectPyClassAttr(source: string, stmt: Node, stack: string[], out: Decl[]): void {
+	if (stmt.type !== 'expression_statement') return;
+	for (const child of stmt.namedChildren) {
+		if (child?.type !== 'assignment') continue;
+		const left = child.childForFieldName('left');
+		if (left?.type === 'identifier') decl(source, stmt, [...stack, left.text], out);
 	}
 }
 
@@ -274,9 +340,16 @@ function declName(node: Node): string | undefined {
 	const dtor = node.childForFieldName('declarator');
 	if (dtor) return firstDescendantText(dtor, CPP_DECL_TYPES);
 	// field-less grammars (e.g. kotlin): the name is the first identifier-like
-	// child of the declaration node
+	// child of the declaration node, or — for a kotlin `val x` / `var x`
+	// property — the identifier one level down inside its variable_declaration.
 	for (const c of node.namedChildren) {
-		if (c && /(^|_)identifier$/.test(c.type)) return c.text;
+		if (!c) continue;
+		if (/(^|_)identifier$/.test(c.type)) return c.text;
+		if (c.type === 'variable_declaration') {
+			for (const g of c.namedChildren) {
+				if (g && /(^|_)identifier$/.test(g.type)) return g.text;
+			}
+		}
 	}
 	return undefined;
 }
@@ -329,7 +402,10 @@ const COLLECTORS: Record<LanguageId, Collector> = {
 	go: collectGo,
 	python: collectPython,
 	rust: namedCollector(
-		['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition'],
+		// field_declaration: a struct field is API contract, addressable as
+		// `Struct.field` (the generic walk qualifies it through the struct on the
+		// stack). A function-body local is a let_declaration, not collected.
+		['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition', 'field_declaration'],
 		{ functionLike: ['function_item'], valueBindings: ['const_item', 'static_item'] }
 	),
 	java: namedCollector(
@@ -443,6 +519,12 @@ export async function findSymbol(source: string, file: string, fragment: string)
 	if (matches.length === 0) {
 		throw new DocrefError('symbol-not-found', `no declaration matches "${fragment}" in ${file}`);
 	}
+	// An exact full-path match wins over a same-leaf suffix match: `anchors`
+	// names the top-level function even when a field `Result.anchors` shares the
+	// leaf. A top-level declaration has no parent to qualify with, so without this
+	// it would be unaddressable the moment any nested member reused its name.
+	const exact = matches.filter((m) => m.path.length === segs.length);
+	if (exact.length === 1) return exact[0]!;
 	if (matches.length > 1) {
 		const names = matches.map((m) => m.path.join('.')).join(', ');
 		throw new DocrefError(

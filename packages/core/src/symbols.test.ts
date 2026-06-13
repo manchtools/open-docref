@@ -441,9 +441,9 @@ pub const FACTOR: i32 = 99;
 	});
 
 	it('kotlin: a val inside a fun body is not a symbol', async () => {
-		// (kotlin class-level `val` is not currently addressable at all — its name
-		// sits under variable_declaration, out of declName's reach — so this pins
-		// only that the function-body local does not leak; the class/fun do resolve)
+		// a kotlin class-level `val`/`var` IS addressable as `Type.property` (see
+		// the field-level tests); this pins that a function-body local still does
+		// not leak — the class and fun resolve, the body-local val does not
 		const KT = `class C {
   fun outer(): Int {
     val local = 2
@@ -470,6 +470,200 @@ pub const FACTOR: i32 = 99;
 		expect(paths).toContain('C.Count');
 		expect(paths).toContain('C.Outer');
 		expect(paths).not.toContain('C.Outer.local');
+	});
+});
+
+// Contract (C4): class/struct/interface FIELDS and properties are public API
+// surface that changes slowly — `User.email`, `Config.retryCount`. Like a proto
+// message field, a qualified `Type.field` is addressable; a bare field name
+// shared by two types is ambiguous and fails closed. Function-body LOCALS are
+// never fields and stay excluded (the scope contract above is not weakened).
+describe('field-level symbols: fields and properties are API contract', () => {
+	it('typescript: class fields and interface properties resolve as Type.member', async () => {
+		const SRC = `export class User {
+	id: string = '';
+	email: string = '';
+	#secret = 0;
+}
+
+export class Device {
+	id: string = '';
+}
+
+export interface Config {
+	retryCount: number;
+	email: string;
+}
+`;
+		expect((await findSymbol(SRC, 'a.ts', 'User.email')).content).toContain('email');
+		expect((await findSymbol(SRC, 'a.ts', 'Config.retryCount')).content).toContain('retryCount');
+		// id is on User and Device; email is on User and Config: bare names fail closed
+		expect(await code(() => findSymbol(SRC, 'a.ts', 'id'))).toBe('symbol-ambiguous');
+		expect(await code(() => findSymbol(SRC, 'a.ts', 'email'))).toBe('symbol-ambiguous');
+		// a unique field resolves bare
+		expect((await findSymbol(SRC, 'a.ts', 'retryCount')).content).toContain('retryCount');
+		// a private #field carries a '#' that cannot appear in a ref fragment, so
+		// it is not collected
+		const paths = (await listDeclarations(SRC, 'a.ts')).map((d) => d.path.join('.'));
+		expect(paths.some((p) => p.includes('#'))).toBe(false);
+		expect(paths).not.toContain('User.secret');
+	});
+
+	it('typescript: a class field initialized with an arrow does not leak its locals', async () => {
+		const SRC = `export class C {
+	handler = (x: number) => {
+		const local = x + 1;
+		return local;
+	};
+}
+`;
+		const paths = (await listDeclarations(SRC, 'a.ts')).map((d) => d.path.join('.'));
+		expect(paths).toContain('C.handler');
+		expect(paths).not.toContain('C.local');
+		expect(paths).not.toContain('C.handler.local');
+	});
+
+	it('go: struct fields resolve as Type.field and shared names fail closed', async () => {
+		const SRC = `package m
+
+type User struct {
+	ID    string
+	Email string
+}
+
+type Device struct {
+	ID string
+}
+`;
+		expect((await findSymbol(SRC, 'a.go', 'User.Email')).content).toContain('Email');
+		expect((await findSymbol(SRC, 'a.go', 'User.ID')).content).toContain('ID');
+		expect(await code(() => findSymbol(SRC, 'a.go', 'ID'))).toBe('symbol-ambiguous');
+		expect((await findSymbol(SRC, 'a.go', 'Email')).content).toContain('Email');
+	});
+
+	it('go: an embedded (nameless) struct field is not collected', async () => {
+		const SRC = `package m
+
+type Base struct{ X int }
+
+type Derived struct {
+	Base
+	Y int
+}
+`;
+		const paths = (await listDeclarations(SRC, 'a.go')).map((d) => d.path.join('.'));
+		expect(paths).toContain('Derived.Y');
+		// the embedded Base is a type reference, not a named field of Derived
+		expect(paths).not.toContain('Derived.Base');
+	});
+
+	it('rust: struct fields resolve as Struct.field', async () => {
+		const SRC = `pub struct User {
+    pub id: String,
+    pub email: String,
+}
+
+pub struct Device {
+    pub id: String,
+}
+`;
+		expect((await findSymbol(SRC, 'a.rs', 'User.email')).content).toContain('email');
+		expect(await code(() => findSymbol(SRC, 'a.rs', 'id'))).toBe('symbol-ambiguous');
+		expect((await findSymbol(SRC, 'a.rs', 'email')).content).toContain('email');
+	});
+
+	it('python: class-level attributes resolve as Class.attr; method locals do not', async () => {
+		const SRC = `class Config:
+    retry_count: int = 3
+    label = "x"
+
+    def load(self):
+        local = 1
+        self.dynamic = 2
+        return local
+
+class Other:
+    retry_count: int = 5
+`;
+		expect((await findSymbol(SRC, 'a.py', 'Config.retry_count')).content).toContain('retry_count');
+		expect((await findSymbol(SRC, 'a.py', 'Config.label')).content).toContain('label');
+		// retry_count is declared on two classes -> bare is ambiguous
+		expect(await code(() => findSymbol(SRC, 'a.py', 'retry_count'))).toBe('symbol-ambiguous');
+		const paths = (await listDeclarations(SRC, 'a.py')).map((d) => d.path.join('.'));
+		// a method-body local and a self.x assignment are NOT class attributes
+		expect(paths).not.toContain('Config.local');
+		expect(paths).not.toContain('Config.load.local');
+		expect(paths).not.toContain('Config.dynamic');
+	});
+
+	it('swift: a stored property is addressable and bare-ambiguous across types', async () => {
+		const SRC = `class User {
+  let id = ""
+  var email = ""
+}
+class Device {
+  let id = ""
+}
+`;
+		expect((await findSymbol(SRC, 'a.swift', 'User.email')).content).toContain('email');
+		expect(await code(() => findSymbol(SRC, 'a.swift', 'id'))).toBe('symbol-ambiguous');
+	});
+
+	it('kotlin: a class property is addressable as Type.property', async () => {
+		const SRC = `class User {
+  val id: String = ""
+  var email: String = ""
+}
+class Device {
+  val id: String = ""
+}
+`;
+		expect((await findSymbol(SRC, 'a.kt', 'User.email')).content).toContain('email');
+		expect(await code(() => findSymbol(SRC, 'a.kt', 'id'))).toBe('symbol-ambiguous');
+	});
+
+	it('csharp: an auto-property is addressable and bare-ambiguous across types', async () => {
+		const SRC = `class User {
+  public string Id { get; set; }
+  public string Email { get; set; }
+}
+class Device {
+  public string Id { get; set; }
+}
+`;
+		expect((await findSymbol(SRC, 'A.cs', 'User.Email')).content).toContain('Email');
+		expect(await code(() => findSymbol(SRC, 'A.cs', 'Id'))).toBe('symbol-ambiguous');
+	});
+
+	it('a bare name exactly matching a top-level decl wins over a same-leaf nested field', async () => {
+		// once fields are collected, a top-level function and a type field can share
+		// a leaf (`items` the function, `Result.items` the field). The top-level
+		// name has no parent to qualify with, so an EXACT full-path match must win
+		// over the field's suffix match — otherwise the function is unaddressable.
+		const SRC = `export interface Result {
+	items: string[];
+}
+
+export function items(): string[] {
+	return [];
+}
+`;
+		expect((await findSymbol(SRC, 'a.ts', 'items')).content).toContain('function items');
+		expect((await findSymbol(SRC, 'a.ts', 'Result.items')).content).toContain('items: string[]');
+	});
+
+	it('a shared leaf with no exact top-level match still fails closed', async () => {
+		// the exact-match rule must not paper over a genuine ambiguity: two fields
+		// of the same leaf and no top-level decl of that name stays ambiguous
+		const SRC = `export interface A {
+	value: number;
+}
+
+export interface B {
+	value: number;
+}
+`;
+		expect(await code(() => findSymbol(SRC, 'a.ts', 'value'))).toBe('symbol-ambiguous');
 	});
 });
 
