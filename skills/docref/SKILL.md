@@ -120,17 +120,24 @@ Rules that matter:
 ## 3. Symbols (the default — prefer these)
 
 A symbol fragment names a declaration: **function, method, class, type,
-interface, enum, top-level constant** — and, where a language makes a member's
-identity part of a contract, **that member too**: a protobuf message **field**
-or **enum value** anchors as `Message.field` / `Enum.VALUE`, because its *number*
-is wire-breaking and the most drift-prone thing in a schema.
+interface, enum, top-level constant** — and a **member that is part of an API
+contract**: a **class field**, a **struct field**, or an **interface/protocol
+property** anchors as `Type.field`, and a protobuf message **field** or **enum
+value** anchors the same way (its *number* is wire-breaking, the most drift-prone
+thing in a schema). A field name your docs cite — `User.email`,
+`Config.retryCount`, `CreateRequest.shares` — is anchorable; reach for it before
+a region marker.
 
 - **Nesting uses `.`**: `Class.method`, `Outer.Inner`, `Service.Rpc`,
-  `Message.field`.
+  `Message.field`, `User.email`.
 - Resolution is **structural** (tree-sitter), not textual.
 - **Fail-closed**: a fragment that matches zero or more than one declaration is
   *broken*, never a guess. A bare name shared by several containers is ambiguous;
-  qualify it (`Account.id`, not `id`).
+  qualify it (`Account.id`, not `id`). An exact top-level name wins over a field
+  that merely shares its leaf, so a top-level `anchors` still resolves even if a
+  type has an `anchors` field.
+- **Not anchorable**: a local variable inside a function body, and (for now) a
+  Python attribute set as `self.x` in a method — only class-level attributes.
 - **Supported languages** (symbols resolve directly): TypeScript, JavaScript,
   TSX, Go, Python, Rust, Java, C, C++, C#, Ruby, PHP, Swift, Kotlin, Scala, Bash,
   Protocol Buffers. **Any other file type** still works — with a region marker.
@@ -247,8 +254,15 @@ docref snippet src/api/handler.go#VerifySignature   # prints a materialized snip
 | `broken` | the ref no longer resolves (symbol/region/file gone, or ambiguous) | repoint the ref, qualify the name, or switch to a region marker |
 
 Plus `unused-anchor`: a region marker nothing references — reference it or delete
-it. `broken` and config errors exit `2`; stale/unused exit `1`; all clear exits
-`0`.
+it. Under the default **strict** gate: `broken` and config errors exit `2`;
+stale/unused exit `1`; all clear exits `0`. A repo can relax the gate for
+incremental adoption with `[check] level` in `docref.toml` or a
+`--strict`/`--lenient`/`--advisory` flag: **lenient** still fails on `broken`
+(exit `2`) but lets drift through (exit `0`), so you can anchor liberally before
+everything is approved; **advisory** reports only (always `0`). The report still
+lists every finding — only the exit code relaxes. **Your job is unchanged: drive
+toward all up-to-date.** A relaxed gate is a migration aid, not a license to
+leave drift unfixed.
 
 ---
 
@@ -269,6 +283,7 @@ output.
 | `docref claim <ref…>` / `docref snippet <ref>` | print a paste-ready claim/snippet, sha computed |
 | `docref ls` / `docref anchors` | the reverse index (refs↔locations) / the code-side marker inventory |
 | `docref remove <ref>` | delete a reference everywhere, marker included |
+| `docref repo add <alias> <url> [--ref <branch>]` | declare a cross-repo alias and lock it in one step (no hand-editing `docref.toml`) |
 | `docref install-extension` | install the VS Code extension into your editors |
 | `docref self-update` | update the binary and refresh the extension in lockstep |
 
