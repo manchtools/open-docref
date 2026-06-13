@@ -14,12 +14,29 @@ that nothing references fails the gate (opt out with
 `[anchors] allow-unused = true`); unused anchors are always computed
 against the whole project, even for a path-scoped check.
 
-<!-- docref: begin src=packages/core/src/ops.ts#exitCode:57a1b5ed -->
+<!-- docref: begin src=packages/core/src/ops.ts#exitCodeFor:470b3765 -->
+
+Under the default **strict** gate:
 
 - Exit `0`: everything `up-to-date`, no unused anchors.
 - Exit `1`: at least one `stale-snippet`, `stale-claim`, or unused
   anchor.
 - Exit `2`: at least one `broken` reference or a configuration error.
+
+The gate **level** relaxes this for incremental adoption. Set it with
+`[check] level` in `docref.toml`, or override it per run with a `--strict`,
+`--lenient`, or `--advisory` flag (the flag wins):
+
+- **strict** (default): drift and broken both fail, as above.
+- **lenient**: a `broken` reference or configuration error still fails (exit
+  `2`) — that is a real wiring error — but drift (`stale-snippet`,
+  `stale-claim`, unused anchors) does not gate (exit `0`). Add references now
+  and approve them over time.
+- **advisory**: report only; nothing fails (always exit `0`).
+
+The report still lists every finding under any level; only the exit code (and,
+in the editor, the squiggle severity) relaxes, so a relaxed gate is never a
+silent one.
 
 <!-- docref: end -->
 

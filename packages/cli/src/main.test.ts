@@ -79,6 +79,55 @@ describe('docref CLI', () => {
 		expect(res.out).toContain('broken');
 	});
 
+	describe('check gate levels (incremental adoption)', () => {
+		const staleRoot = async () => {
+			const root = project();
+			await run(['refresh'], root);
+			write(root, 'src/lib.ts', read(root, 'src/lib.ts').replace('"hi"', '"ho"'));
+			return root;
+		};
+		const brokenRoot = () => {
+			const root = tmp();
+			write(root, 'docs/page.md', '```ts docref=src/gone.ts#x\n```\n');
+			return root;
+		};
+
+		it('--lenient: drift does not gate (exit 0) but the report still names it', async () => {
+			const res = await run(['check', '--lenient'], await staleRoot());
+			expect(res.code).toBe(0);
+			expect(res.out).toContain('stale-snippet');
+			expect(res.out).toContain('lenient');
+		});
+
+		it('--lenient: a broken ref still fails closed (exit 2)', async () => {
+			expect((await run(['check', '--lenient'], brokenRoot())).code).toBe(2);
+		});
+
+		it('--advisory: nothing gates, even a broken ref — but it is still reported', async () => {
+			const res = await run(['check', '--advisory'], brokenRoot());
+			expect(res.code).toBe(0);
+			expect(res.out).toContain('broken');
+			expect(res.out).toContain('advisory');
+		});
+
+		it('reads the level from [check] in docref.toml when no flag is given', async () => {
+			const root = await staleRoot();
+			write(root, 'docref.toml', '[check]\nlevel = "lenient"\n');
+			expect((await run(['check'], root)).code).toBe(0);
+		});
+
+		it('a flag overrides the configured level', async () => {
+			const root = await staleRoot();
+			write(root, 'docref.toml', '[check]\nlevel = "advisory"\n');
+			// config alone would exit 0; --strict forces the gate back on
+			expect((await run(['check', '--strict'], root)).code).toBe(1);
+		});
+
+		it('two conflicting level flags is a usage error', async () => {
+			expect((await run(['check', '--lenient', '--advisory'], project())).code).toBe(2);
+		});
+	});
+
 	it('approve without paths is a usage error', async () => {
 		const res = await run(['approve'], project());
 		expect(res.code).toBe(2);

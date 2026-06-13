@@ -3,7 +3,7 @@
 // symbol-vs-region choice, and the mappings from core reports to
 // diagnostics, tree nodes, and the status line.
 import { isKebabName } from '@open-docref/core';
-import type { AnchorsResult, Decl, Report, RefIndex, State } from '@open-docref/core';
+import type { AnchorsResult, Decl, GateLevel, Report, RefIndex, State } from '@open-docref/core';
 
 /**
  * A workspace file's path as a POSIX, repo-relative path, or null when it is not
@@ -163,7 +163,7 @@ export function symbolFragmentForSelection(
 
 export type DiagnosticData = {
 	line: number;
-	severity: 'error' | 'warning';
+	severity: 'error' | 'warning' | 'information';
 	message: string;
 	code: string;
 	/** The ref the squiggle sits on, so the editor can jump to the code or
@@ -171,7 +171,21 @@ export type DiagnosticData = {
 	ref?: string;
 };
 
-export function diagnosticsFromReport(report: Report): Map<string, DiagnosticData[]> {
+// In-editor severity tracks the gate level, so the squiggle matches what
+// actually fails CI. A "hard" finding is a broken ref or scan error; a "soft"
+// one is drift (stale snippet/claim or an unused anchor). strict: hard=Error,
+// soft=Warning (today). lenient: a broken ref still gates, so hard=Error, but
+// drift does not, so soft=Information. advisory: nothing gates, so hard=Warning
+// and soft=Information.
+function severityOf(hard: boolean, level: GateLevel): DiagnosticData['severity'] {
+	if (hard) return level === 'advisory' ? 'warning' : 'error';
+	return level === 'strict' ? 'warning' : 'information';
+}
+
+export function diagnosticsFromReport(
+	report: Report,
+	level: GateLevel = 'strict'
+): Map<string, DiagnosticData[]> {
 	const byDoc = new Map<string, DiagnosticData[]>();
 	const push = (doc: string, d: DiagnosticData) => {
 		const list = byDoc.get(doc) ?? [];
@@ -183,19 +197,19 @@ export function diagnosticsFromReport(report: Report): Map<string, DiagnosticDat
 		const hashes = e.pinned || e.current ? ` (${e.pinned ?? 'unapproved'} -> ${e.current ?? '?'})` : '';
 		push(e.doc, {
 			line: e.line,
-			severity: e.state === 'broken' ? 'error' : 'warning',
+			severity: severityOf(e.state === 'broken', level),
 			message: `${e.state}: ${e.ref}${hashes}${e.reason ? ` ${e.reason}` : ''}`,
 			code: e.state,
 			ref: e.ref
 		});
 	}
 	for (const e of report.errors) {
-		push(e.doc, { line: e.line, severity: 'error', message: e.message, code: e.code });
+		push(e.doc, { line: e.line, severity: severityOf(true, level), message: e.message, code: e.code });
 	}
 	for (const u of report.unusedAnchors) {
 		push(u.file, {
 			line: u.line,
-			severity: 'warning',
+			severity: severityOf(false, level),
 			message: `unused-anchor: nothing references ${u.file}#@${u.name}`,
 			code: 'unused-anchor',
 			ref: `${u.file}#@${u.name}`
@@ -466,23 +480,26 @@ export function isRelevantChange(
 	return refPaths.has(rel) || anchorFiles.has(rel);
 }
 
-export function statusText(report: Report | null): string {
+export function statusText(report: Report | null, level: GateLevel = 'strict'): string {
 	if (!report) return 'docref';
 	const s = report.summary;
 	const stale = s.staleSnippet + s.staleClaim;
 	const broken = s.broken + report.errors.length;
+	const suffix = level === 'strict' ? '' : ` · ${level}`;
 	if (broken > 0) {
 		const parts = [];
 		if (s.broken) parts.push(`${s.broken} broken`);
 		if (report.errors.length) parts.push(`${report.errors.length} error${report.errors.length === 1 ? '' : 's'}`);
 		if (stale) parts.push(`${stale} stale`);
-		return `docref $(error) ${parts.join(', ')}`;
+		// advisory never fails, so the count is shown without the alarming error glyph
+		const glyph = level === 'advisory' ? '$(info)' : '$(error)';
+		return `docref ${glyph} ${parts.join(', ')}${suffix}`;
 	}
-	if (stale > 0) return `docref $(warning) ${stale} stale`;
+	if (stale > 0) return `docref $(warning) ${stale} stale${suffix}`;
 	if (report.unusedAnchors.length > 0) {
-		return `docref $(warning) ${report.unusedAnchors.length} unused`;
+		return `docref $(warning) ${report.unusedAnchors.length} unused${suffix}`;
 	}
-	return `docref $(check) ${s.upToDate}`;
+	return `docref $(check) ${s.upToDate}${suffix}`;
 }
 
 /** The Staged view: refs collected for insertion into documents. */

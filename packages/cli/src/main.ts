@@ -23,10 +23,13 @@ import {
 	snippetFenceText,
 	fenceLanguageForRef,
 	exitCode,
+	exitCodeFor,
 	EXIT,
+	GATE_LEVELS,
 	suggest,
 	type Report,
-	type ReportEntry
+	type ReportEntry,
+	type GateLevel
 } from '@open-docref/core';
 import { installExtension } from './installext';
 import { emit } from './standalone-dispatch';
@@ -40,10 +43,14 @@ const USAGE = `usage: docref <command> [options]
 
 commands:
   check [paths...]            report reference states; writes nothing
+         --strict             drift and broken both fail (the default)
+         --lenient            only broken/errors fail; drift does not gate
+         --advisory           report only; nothing fails
   refresh [paths...]          rewrite stale snippets (mechanical)
   approve <paths...>          record claim approvals after reviewing the prose
   update [aliases...]         pin cross-repo aliases to their branch tips
          --check              dry run: report drift, write nothing
+         --strict|--lenient|--advisory   gate level (as for check)
   diff [paths...]             what changed since each stale claim was approved
   affected --since <rev>      references endangered by changes since <rev>
   suggest                     prose that names anchorable code but isn't anchored
@@ -118,7 +125,27 @@ function unifiedDiff(approved: string, current: string): string {
 	}
 }
 
-function renderReport(report: Report, json: boolean): string {
+// Under a relaxed gate the report still lists every finding; this one line keeps
+// the relaxation honest by spelling out what is reported-but-not-gating, so a
+// green exit is never silently hiding drift or a broken ref.
+function gateNote(report: Report, level: GateLevel): string | null {
+	if (level === 'strict') return null;
+	const s = report.summary;
+	const drift = s.staleSnippet + s.staleClaim + report.unusedAnchors.length;
+	const hard = s.broken + report.errors.length;
+	if (level === 'advisory') {
+		const total = hard + drift;
+		return total === 0
+			? 'advisory: nothing to gate'
+			: `advisory: ${total} finding(s) reported, exit 0 (nothing gates)`;
+	}
+	if (hard > 0) return `lenient: ${hard} broken/error gating (exit 2); ${drift} drift finding(s) not gating`;
+	return drift === 0
+		? 'lenient: clean'
+		: `lenient: ${drift} drift finding(s) reported, exit 0 (a broken ref would still gate)`;
+}
+
+function renderReport(report: Report, json: boolean, level: GateLevel = 'strict'): string {
 	if (json) return JSON.stringify(report, null, 2);
 	const lines = [
 		...report.errors.map((e) => `error  ${e.doc}:${e.line}  ${e.message}`),
@@ -129,7 +156,20 @@ function renderReport(report: Report, json: boolean): string {
 	lines.push(
 		`${s.upToDate} up-to-date, ${s.staleSnippet} stale-snippet, ${s.staleClaim} stale-claim, ${s.broken} broken, ${report.unusedAnchors.length} unused-anchor, ${report.errors.length} errors`
 	);
+	const note = gateNote(report, level);
+	if (note) lines.push(note);
 	return lines.join('\n');
+}
+
+// Pop at most one of --strict/--lenient/--advisory from args. Returns the
+// override, or the configured default when none is given, or a usage error when
+// more than one is passed (an ambiguous gate must fail closed, not pick one).
+function resolveLevel(args: string[], configured: GateLevel): GateLevel | { error: string } {
+	const found = GATE_LEVELS.filter((l) => popFlag(args, `--${l}`));
+	if (found.length > 1) {
+		return { error: `choose at most one of ${GATE_LEVELS.map((l) => `--${l}`).join(', ')}` };
+	}
+	return found[0] ?? configured;
 }
 
 export async function run(argv: string[], cwd: string): Promise<{ code: number; out: string }> {
@@ -148,8 +188,11 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 		const project = () => loadProject(findRoot(cwd));
 		switch (cmd) {
 			case 'check': {
-				const report = await check(project(), rest.length ? rest : undefined);
-				return { code: exitCode(report), out: renderReport(report, json) };
+				const p = project();
+				const level = resolveLevel(rest, p.check.level);
+				if (typeof level === 'object') return usage(level.error);
+				const report = await check(p, rest.length ? rest : undefined);
+				return { code: exitCodeFor(report, level), out: renderReport(report, json, level) };
 			}
 			case 'refresh': {
 				const { report, changedDocs } = await refresh(project(), rest.length ? rest : undefined);
@@ -170,16 +213,19 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 			}
 			case 'update': {
 				const checkOnly = popFlag(rest, '--check');
-				const result = await update(project(), {
+				const p = project();
+				const level = resolveLevel(rest, p.check.level);
+				if (typeof level === 'object') return usage(level.error);
+				const result = await update(p, {
 					...(rest.length ? { aliases: rest } : {}),
 					checkOnly
 				});
-				const code = exitCode(result.report);
+				const code = exitCodeFor(result.report, level);
 				if (json) return { code, out: JSON.stringify(result, null, 2) };
 				const lines = result.changed.map(
 					(c) => `${checkOnly ? 'would pin' : 'pinned'}  ${c.alias}  ${c.from?.slice(0, 12) ?? '(new)'} -> ${c.to.slice(0, 12)}`
 				);
-				return { code, out: [...lines, renderReport(result.report, false)].join('\n') };
+				return { code, out: [...lines, renderReport(result.report, false, level)].join('\n') };
 			}
 			case 'affected': {
 				const since = popValue(rest, '--since');

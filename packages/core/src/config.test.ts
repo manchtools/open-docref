@@ -73,6 +73,39 @@ describe('loadProject: config parsing and validation', () => {
 	});
 });
 
+describe('loadProject: check gate level', () => {
+	it('defaults to strict when [check] is absent', () => {
+		const root = tmp();
+		write(root, 'docref.toml', '');
+		expect(loadProject(root).check.level).toBe('strict');
+	});
+
+	it('honors each valid level', () => {
+		for (const level of ['strict', 'lenient', 'advisory'] as const) {
+			const root = tmp();
+			write(root, 'docref.toml', `[check]\nlevel = "${level}"\n`);
+			expect(loadProject(root).check.level).toBe(level);
+		}
+	});
+
+	it('rejects an unknown level (fail closed), naming the key', () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[check]\nlevel = "loose"\n');
+		expect(code(() => loadProject(root))).toBe('invalid-config');
+		try {
+			loadProject(root);
+		} catch (e) {
+			expect((e as DocrefError).message).toContain('check.level');
+		}
+	});
+
+	it('rejects a non-string level (present but wrong type)', () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[check]\nlevel = 3\n');
+		expect(code(() => loadProject(root))).toBe('invalid-config');
+	});
+});
+
 describe('findRoot: locating the project root', () => {
 	it('walks up from a nested dir to the nearest docref.toml', () => {
 		const root = tmp();

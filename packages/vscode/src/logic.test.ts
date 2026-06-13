@@ -283,6 +283,40 @@ describe('diagnosticsFromReport', () => {
 	});
 });
 
+describe('diagnosticsFromReport: severity by gate level', () => {
+	// In-editor severity follows the gate level so the squiggle matches what
+	// actually fails CI: lenient keeps broken loud (Error) but quiets drift
+	// (Information); advisory quiets everything since nothing gates.
+	it('strict (default) is unchanged: drift warning, broken/error error', () => {
+		const byDoc = diagnosticsFromReport(REPORT, 'strict');
+		expect(byDoc.get('docs/a.md')![0]!.severity).toBe('warning');
+		expect(byDoc.get('docs/b.md')![0]!.severity).toBe('error');
+		expect(byDoc.get('docs/c.md')![0]!.severity).toBe('error');
+	});
+
+	it('lenient downgrades drift to information but keeps broken/errors as errors', () => {
+		const byDoc = diagnosticsFromReport(REPORT, 'lenient');
+		expect(byDoc.get('docs/a.md')![0]!.severity).toBe('information'); // stale-claim
+		expect(byDoc.get('docs/b.md')![0]!.severity).toBe('error'); // broken
+		expect(byDoc.get('docs/c.md')![0]!.severity).toBe('error'); // scan error
+	});
+
+	it('advisory downgrades everything: drift to information, broken/errors to warning', () => {
+		const byDoc = diagnosticsFromReport(REPORT, 'advisory');
+		expect(byDoc.get('docs/a.md')![0]!.severity).toBe('information');
+		expect(byDoc.get('docs/b.md')![0]!.severity).toBe('warning');
+		expect(byDoc.get('docs/c.md')![0]!.severity).toBe('warning');
+	});
+
+	it('an unused anchor follows the soft path: warning when strict, information when relaxed', () => {
+		const withUnused = { ...REPORT, unusedAnchors: [{ file: 'src/x.ts', name: 'spare', line: 7 }] };
+		expect(diagnosticsFromReport(withUnused, 'strict').get('src/x.ts')![0]!.severity).toBe('warning');
+		expect(diagnosticsFromReport(withUnused, 'lenient').get('src/x.ts')![0]!.severity).toBe(
+			'information'
+		);
+	});
+});
+
 describe('quickFixesForState', () => {
 	// The available editor quick fixes are decided here so the vscode layer
 	// stays a thin command-dispatcher. Each state offers only actions that can
@@ -488,6 +522,27 @@ describe('statusText', () => {
 				summary: { upToDate: 2, staleSnippet: 0, staleClaim: 0, broken: 0 }
 			})
 		).toBe('docref $(warning) 1 unused');
+	});
+
+	it('names the level when not strict, and advisory drops the error glyph', () => {
+		const clean: Report = {
+			entries: [],
+			errors: [],
+			unusedAnchors: [],
+			summary: { upToDate: 5, staleSnippet: 0, staleClaim: 0, broken: 0 }
+		};
+		expect(statusText(clean, 'lenient')).toContain('lenient');
+		// advisory never fails, so a broken count is shown without the error glyph
+		const broken: Report = {
+			entries: [],
+			errors: [],
+			unusedAnchors: [],
+			summary: { upToDate: 0, staleSnippet: 0, staleClaim: 0, broken: 2 }
+		};
+		const out = statusText(broken, 'advisory');
+		expect(out).toContain('2 broken');
+		expect(out).toContain('advisory');
+		expect(out).not.toContain('$(error)');
 	});
 });
 

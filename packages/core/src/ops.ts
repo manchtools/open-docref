@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { glob } from 'tinyglobby';
-import type { Project } from './config';
+import type { Project, GateLevel } from './config';
 import { writeLock } from './config';
 import { DocrefError } from './errors';
 import { contentHash, shortHash, hashesMatch, SHORT_HASH_LEN } from './hash';
@@ -61,11 +61,26 @@ export type Report = {
  * or usage error. Named so the CLI does not scatter 0/1/2 literals. */
 export const EXIT = { ok: 0, stale: 1, broken: 2 } as const;
 
-export function exitCode(report: Report): 0 | 1 | 2 {
+/**
+ * The gate result under a given level (config.ts GateLevel):
+ * - strict (default): drift (stale/unused) → 1, broken/errors → 2.
+ * - lenient: a broken ref or scan error still fails (2) — a real wiring error —
+ *   but recoverable drift does not gate, so references can be added before they
+ *   are all approved. The report still reports the drift.
+ * - advisory: report only; nothing gates, always 0.
+ */
+export function exitCodeFor(report: Report, level: GateLevel = 'strict'): 0 | 1 | 2 {
+	if (level === 'advisory') return EXIT.ok;
 	const s = report.summary;
 	if (report.errors.length > 0 || s.broken > 0) return EXIT.broken;
+	if (level === 'lenient') return EXIT.ok;
 	if (s.staleSnippet > 0 || s.staleClaim > 0 || report.unusedAnchors.length > 0) return EXIT.stale;
 	return EXIT.ok;
+}
+
+/** The strict gate (back-compat shorthand; callers that take a level use exitCodeFor). */
+export function exitCode(report: Report): 0 | 1 | 2 {
+	return exitCodeFor(report, 'strict');
 }
 
 function assertNever(x: never): never {

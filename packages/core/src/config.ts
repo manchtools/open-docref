@@ -9,11 +9,20 @@ import { assertRev, assertRef, assertUrl } from './gitcache';
 
 export type RepoConfig = { url: string; ref?: string };
 
+// The CI gate's strictness. strict (default): drift and broken both fail.
+// lenient: a broken ref still fails (a real wiring error), but drift/unapproved
+// do not — the incremental-adoption on-ramp. advisory: report everything, fail
+// nothing.
+export type GateLevel = 'strict' | 'lenient' | 'advisory';
+export const GATE_LEVELS: readonly GateLevel[] = ['strict', 'lenient', 'advisory'];
+
 export type Project = {
 	root: string;
 	scan: { include: string[]; exclude: string[] };
 	/** where to look for region markers (the code-side inventory) */
 	anchors: { include: string[]; exclude: string[]; allowUnused: boolean };
+	/** how strict `check` is about gating CI; see GateLevel */
+	check: { level: GateLevel };
 	repos: Record<string, RepoConfig>;
 	lock: Record<string, { rev: string }>;
 };
@@ -37,6 +46,7 @@ export function loadProject(root: string): Project {
 		root,
 		scan: { include: DEFAULT_INCLUDE, exclude: [...ALWAYS_EXCLUDE] },
 		anchors: { include: ['**/*'], exclude: [...ALWAYS_EXCLUDE], allowUnused: false },
+		check: { level: 'strict' },
 		repos: {},
 		lock: {}
 	};
@@ -53,6 +63,16 @@ export function loadProject(root: string): Project {
 		if (anchors?.include?.length) project.anchors.include = anchors.include;
 		if (anchors?.exclude?.length) project.anchors.exclude.push(...anchors.exclude);
 		if (anchors?.['allow-unused'] === true) project.anchors.allowUnused = true;
+		const check = t.check as { level?: unknown } | undefined;
+		if (check?.level !== undefined) {
+			if (!GATE_LEVELS.includes(check.level as GateLevel)) {
+				throw new DocrefError(
+					'invalid-config',
+					`check.level in docref.toml must be one of ${GATE_LEVELS.join(', ')}, not ${JSON.stringify(check.level)}`
+				);
+			}
+			project.check.level = check.level as GateLevel;
+		}
 		const repos = (t.repos ?? {}) as Record<string, { url?: string; ref?: string }>;
 		for (const [alias, repo] of Object.entries(repos)) {
 			if (!repo.url) {

@@ -48,7 +48,7 @@ no marker needed) or a **region** (a span named in the source with
 `docref: begin <name>` / `docref: end <name>`, for sub-symbol slices). The code
 side has its own loud signal, not just the docs:
 
-<!-- docref: begin src=packages/core/src/ops.ts#anchors:8d9d6ba5,packages/core/src/ops.ts#exitCode:57a1b5ed -->
+<!-- docref: begin src=packages/core/src/ops.ts#anchors:8d9d6ba5,packages/core/src/ops.ts#exitCode:d41a5364 -->
 `docref anchors` inventories every region marker and what references it, and a
 marker that nothing references is flagged **not used**, which fails
 `docref check` unless `[anchors] allow-unused = true`. A stranded marker, like a

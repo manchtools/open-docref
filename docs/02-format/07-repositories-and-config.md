@@ -8,10 +8,10 @@ label: Repositories & config
 
 ## `docref.toml` (authored, committed)
 
-<!-- docref: begin src=packages/core/src/config.ts#loadProject:56a6649b -->
+<!-- docref: begin src=packages/core/src/config.ts#loadProject:357bc7d5 -->
 
 Lives at the root of the repository containing the markdown. Declares
-cross-repo aliases and scan scope:
+cross-repo aliases, scan scope, and the check gate level:
 
 <!-- docref: end -->
 
@@ -25,6 +25,10 @@ include = ["src/**"]                      # default: everything; where
 exclude = ["vendor/**"]                   # region markers are inventoried
 allow-unused = false                      # default: an unreferenced
                                           # marker fails `docref check`
+
+[check]
+level = "strict"                          # strict (default) | lenient |
+                                          # advisory; see check's gate level
 
 [repos.open-secret]
 url = "https://github.com/manchtools/open-secret"

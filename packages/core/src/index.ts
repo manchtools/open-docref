@@ -18,7 +18,7 @@ export {
 export { listDeclarations, findSymbol, configureWasm, type Decl, type WasmConfig } from './symbols';
 export { languageForFile, fenceLanguageForRef, type LanguageId, type LanguageInfo } from './languages';
 export { workingTreeSource, resolveAnchor, type FileSource, type Anchor } from './resolve';
-export { loadProject, writeLock, findRoot, type Project, type RepoConfig } from './config';
+export { loadProject, writeLock, findRoot, GATE_LEVELS, type Project, type RepoConfig, type GateLevel } from './config';
 export { ensureCommit, branchTip, gitRevSource } from './gitcache';
 export {
 	check,
@@ -32,6 +32,7 @@ export {
 	remove,
 	resolveReference,
 	exitCode,
+	exitCodeFor,
 	EXIT,
 	anchorFiles,
 	suggest,

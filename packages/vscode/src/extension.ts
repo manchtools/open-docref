@@ -358,17 +358,22 @@ export function activate(context: vscode.ExtensionContext): void {
 		cachedAnchorFileSet = new Set(anchorIndex.anchors.map((a) => a.file));
 		diagnostics.clear();
 		actionableAt = new Map();
-		for (const [doc, list] of diagnosticsFromReport(report)) {
+		const level = p.check.level;
+		for (const [doc, list] of diagnosticsFromReport(report, level)) {
 			for (const d of list) actionableAt.set(`${doc}:${d.line}`, { ref: d.ref, code: d.code });
 			diagnostics.set(
 				vscode.Uri.file(`${p.root}/${doc}`),
 				list.map((d) => {
+					const severity =
+						d.severity === 'error'
+							? vscode.DiagnosticSeverity.Error
+							: d.severity === 'information'
+								? vscode.DiagnosticSeverity.Information
+								: vscode.DiagnosticSeverity.Warning;
 					const diag = new vscode.Diagnostic(
 						new vscode.Range(d.line - 1, 0, d.line - 1, 1000),
 						d.message,
-						d.severity === 'error'
-							? vscode.DiagnosticSeverity.Error
-							: vscode.DiagnosticSeverity.Warning
+						severity
 					);
 					diag.source = 'docref';
 					diag.code = d.code;
@@ -376,7 +381,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				})
 			);
 		}
-		status.text = statusText(report);
+		status.text = statusText(report, level);
 		tree.refresh();
 		anchorTree.refresh();
 	}

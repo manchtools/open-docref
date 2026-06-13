@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadProject } from './config';
-import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode, suggest } from './ops';
+import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode, exitCodeFor, suggest, type Report } from './ops';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
 
 // Integration contract for the operations (tooling.md section 1 against the
@@ -48,6 +48,48 @@ function sameRepoProject(): string {
 	);
 	return root;
 }
+
+describe('exitCodeFor: strict / lenient / advisory gate levels', () => {
+	// Incremental adoption: drift (stale/unused) is recoverable and should not have
+	// to gate CI from reference zero, but a BROKEN ref is a real wiring error and
+	// must still fail unless explicitly silenced. strict = today; lenient = broken
+	// gates, drift does not; advisory = report only, nothing gates.
+	const report = (s: {
+		staleSnippet?: number;
+		staleClaim?: number;
+		broken?: number;
+		errors?: number;
+		unused?: number;
+	}): Report => ({
+		entries: [],
+		errors: Array.from({ length: s.errors ?? 0 }, () => ({ doc: 'd', line: 1, code: 'x', message: 'm' })),
+		unusedAnchors: Array.from({ length: s.unused ?? 0 }, () => ({ file: 'f', name: 'n', line: 1 })),
+		summary: { upToDate: 1, staleSnippet: s.staleSnippet ?? 0, staleClaim: s.staleClaim ?? 0, broken: s.broken ?? 0 }
+	});
+
+	it('strict: drift gates (1); broken/errors gate (2); equals the level-less exitCode', () => {
+		expect(exitCodeFor(report({}), 'strict')).toBe(0);
+		expect(exitCodeFor(report({ staleClaim: 1 }), 'strict')).toBe(1);
+		expect(exitCodeFor(report({ unused: 1 }), 'strict')).toBe(1);
+		expect(exitCodeFor(report({ broken: 1 }), 'strict')).toBe(2);
+		expect(exitCodeFor(report({ errors: 1 }), 'strict')).toBe(2);
+		expect(exitCode(report({ staleClaim: 1 }))).toBe(exitCodeFor(report({ staleClaim: 1 }), 'strict'));
+		expect(exitCodeFor(report({ broken: 1 }))).toBe(2); // default is strict
+	});
+
+	it('lenient: drift and unused do NOT gate, but broken/errors still fail closed', () => {
+		expect(exitCodeFor(report({ staleSnippet: 3, staleClaim: 2, unused: 1 }), 'lenient')).toBe(0);
+		expect(exitCodeFor(report({ broken: 1 }), 'lenient')).toBe(2);
+		expect(exitCodeFor(report({ errors: 1 }), 'lenient')).toBe(2);
+		// drift alongside a broken ref still fails on the broken one
+		expect(exitCodeFor(report({ broken: 1, staleClaim: 5 }), 'lenient')).toBe(2);
+	});
+
+	it('advisory: nothing gates — even broken and errors report at exit 0', () => {
+		expect(exitCodeFor(report({ broken: 4, errors: 2, staleClaim: 9, unused: 3 }), 'advisory')).toBe(0);
+		expect(exitCodeFor(report({}), 'advisory')).toBe(0);
+	});
+});
 
 describe('refresh: materializing snippets', () => {
 	it('fills bodies and shas, after which check is up to date and refresh idempotent', async () => {

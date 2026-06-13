@@ -13,12 +13,18 @@ export type State = 'up-to-date' | 'stale-snippet' | 'stale-claim' | 'broken';
 ```
 
 A run of references collapses to a process exit code (clean, stale, or broken),
-which is what makes `check` a usable CI gate.
+which is what makes `check` a usable CI gate. The gate **level** (set with
+`[check] level` or a `--strict`/`--lenient`/`--advisory` flag) decides how
+strict that collapse is: `strict` (default) fails on drift and broken alike;
+`lenient` fails only on a broken ref or error, so drift is reported but does not
+gate; `advisory` reports everything and never fails.
 
-```ts docref=packages/core/src/ops.ts#exitCode:57a1b5ed
-export function exitCode(report: Report): 0 | 1 | 2 {
+```ts docref=packages/core/src/ops.ts#exitCodeFor:470b3765
+export function exitCodeFor(report: Report, level: GateLevel = 'strict'): 0 | 1 | 2 {
+	if (level === 'advisory') return EXIT.ok;
 	const s = report.summary;
 	if (report.errors.length > 0 || s.broken > 0) return EXIT.broken;
+	if (level === 'lenient') return EXIT.ok;
 	if (s.staleSnippet > 0 || s.staleClaim > 0 || report.unusedAnchors.length > 0) return EXIT.stale;
 	return EXIT.ok;
 }
