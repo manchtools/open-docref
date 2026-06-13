@@ -44,6 +44,21 @@ HTML comments carry claims deliberately: they are
 invisible on GitHub and in markdown previews, they survive Prettier,
 and renderers that strip comments lose nothing visible.
 
+## Localized documentation
+
+A claim's `src=` ref and `:sha` describe the **code**, never the prose, so a
+claim works in any language. When a page is translated, carry each claim and
+snippet into the translation unchanged except for the text between the markers:
+same ref, same hash, prose in the new language. Every translated file then
+tracks drift on its own. A change to the referenced code marks the claim
+*stale-claim* in each language at once, and each translation is re-read and
+re-approved separately, so no localized copy is silently left wrong.
+
+Snippets behave the same way: the body is the actual code, which is
+language-neutral, and `docref refresh` keeps every copy current. A translated
+page that drops its anchors can quietly contradict both the code and the
+source-language page; an anchored one cannot.
+
 ## Collection files
 
 A collection (research scratchpad) is just a markdown file made of

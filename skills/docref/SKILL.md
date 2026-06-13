@@ -48,6 +48,13 @@ When you are writing or editing, apply these without being asked:
   code.** Don't wait for the doc to exist. If a few lines carry meaning someone
   will describe (a security check, a wire field, an invariant, a tricky loop),
   mark them now.
+- **Translate or localize a doc → carry every anchor into the translation.** A
+  claim or snippet describes *code*, and its `src=`/`docref=` ref and `:sha`
+  pin the code, never the prose. So a translated copy keeps the **same** ref and
+  the **same** hash; only the text between the markers changes language. A code
+  change then flags the stale claim in **every** language at once, and each
+  translation is re-read and re-approved on its own — a localized page can never
+  quietly drift from the code (or silently lag the source page) again.
 - **When in doubt, anchor.** Over-anchoring is a warning you clean up.
   Under-anchoring is invisible until the docs are already wrong.
 
@@ -309,6 +316,9 @@ refreshes the extension alongside the binary so the editor never lags.
   is a judgment, not a checkbox.
 - **Never silence drift** by deleting an anchor, pinning a stale hash by hand, or
   reaching for line numbers. Fix the prose or repoint the ref.
+- **Never drop anchors when translating.** A localized doc carries the same
+  claims, snippets, and refs as its source — same `:sha`, prose translated. An
+  un-anchored translation is documentation that lies in another language.
 - **Fail closed.** An ambiguous or missing symbol is `broken` on purpose —
   qualify the name or use a region marker; never guess.
 - **Keep docs honest in the same change as the code.** `docref check` exits `0`
