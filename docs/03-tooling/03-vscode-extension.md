@@ -8,15 +8,6 @@ description: Ergonomics over the same core library the CLI uses: CodeLens, diagn
 The extension is ergonomics over the same core library the CLI uses,
 so the editor and CI can never disagree about what counts as stale.
 
-{% callout type="info" title="Screenshots" %}
-Screenshots of the extension live under `static/screenshots/` (see
-`static/screenshots/CAPTURE.txt` for the capture checklist). Planned shots: the
-referenced-by CodeLens, a stale-reference squiggle with its quick-fix menu, the
-References "Needs attention" sidebar, reference autocomplete attaching the hash,
-the claim-block scaffold, the approved-vs-current drift diff, and the status-bar
-counter. They are wired in as screenshot blocks once the images exist.
-{% /callout %}
-
 - **Reverse-index CodeLens:** above any anchored symbol or region,
   "Referenced by N docs". Editing anchored code is the moment the
   author still has context; the lens puts the doc debt in view exactly
