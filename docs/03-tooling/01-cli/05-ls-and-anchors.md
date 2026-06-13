@@ -7,7 +7,7 @@ description: Dump the reverse index of anchors and their references, and invento
 
 ## `docref ls [--json]`
 
-<!-- docref: begin src=packages/core/src/ops.ts#ls:ac543594 -->
+<!-- docref: begin src=packages/core/src/ops.ts#ls:98076b18 -->
 
 Dump the reverse index: every referenced anchor and everything referencing it. The extension's CodeLens and the agent's orientation pass both read this.
 
@@ -15,7 +15,7 @@ Dump the reverse index: every referenced anchor and everything referencing it. T
 
 ## `docref anchors [--json]`
 
-<!-- docref: begin src=packages/core/src/ops.ts#anchors:7cf8e4bb -->
+<!-- docref: begin src=packages/core/src/ops.ts#anchors:8d9d6ba5 -->
 
 The code-side inventory, the reverse of `ls`: scan the source tree for every declared region marker and list each with the references to it; an anchor with none is flagged **not used**. Marker errors (duplicate names, unmatched begin/end) surface here even in files nothing references, which `check` alone would never visit. Exit `2` on marker errors, `0` otherwise (an unused anchor is information, not a failure).
 

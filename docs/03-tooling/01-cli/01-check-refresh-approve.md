@@ -14,7 +14,7 @@ that nothing references fails the gate (opt out with
 `[anchors] allow-unused = true`); unused anchors are always computed
 against the whole project, even for a path-scoped check.
 
-<!-- docref: begin src=packages/core/src/ops.ts#exitCode:926bfd35 -->
+<!-- docref: begin src=packages/core/src/ops.ts#exitCode:57a1b5ed -->
 
 - Exit `0`: everything `up-to-date`, no unused anchors.
 - Exit `1`: at least one `stale-snippet`, `stale-claim`, or unused
@@ -55,7 +55,7 @@ rewrite, so a repo whose only problems were stale snippets exits `0`.
 
 ## `docref approve <paths...>`
 
-<!-- docref: begin src=packages/core/src/ops.ts#approve:81aba3fc -->
+<!-- docref: begin src=packages/core/src/ops.ts#approve:489b2b2f -->
 
 Advance the `:sha` suffixes of claims in the given files to the
 anchors' current hashes. This is the judgment step: it must follow a human or
@@ -67,7 +67,7 @@ paths; there is no `--all`. Refuses to approve a claim whose anchor is
 
 ## `docref diff [paths...] [--json]`
 
-<!-- docref: begin src=packages/core/src/ops.ts#diff:07e65e40 -->
+<!-- docref: begin src=packages/core/src/ops.ts#diff:985e8e6b -->
 
 For every claim that is not up to date: recover the content the
 approver saw and show it against the anchor's current content as a

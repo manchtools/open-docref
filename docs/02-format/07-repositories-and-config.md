@@ -41,7 +41,7 @@ rev = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 ## Resolution semantics
 
-<!-- docref: begin src=packages/core/src/resolve.ts#resolveAnchor:9908f20d,packages/core/src/gitcache.ts#gitRevSource:c1e10c7e -->
+<!-- docref: begin src=packages/core/src/resolve.ts#resolveAnchor:9908f20d,packages/core/src/gitcache.ts#gitRevSource:377cb502 -->
 
 - **Same-repo refs float.** They resolve against the working tree, so
   drift is visible the moment the code is edited. In CI the working
@@ -52,13 +52,14 @@ rev = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   deliberate, batched, reviewable event (typically a scheduled CI job).
 
 <!-- docref: end -->
-<!-- docref: begin src=packages/core/src/gitcache.ts#cacheDirFor:e0236b27,packages/core/src/gitcache.ts#ensureCommit:0ee546f2 -->
+<!-- docref: begin src=packages/core/src/gitcache.ts#cacheDirFor:1b0d5f53,packages/core/src/gitcache.ts#ensureCommit:7d1a6ddb -->
 
 - The cache is a shallow clone per repository under
-  `$XDG_CACHE_HOME/docref/<host>/<owner>/<repo>`, fetched at the locked
-  rev. Git is invoked as the system `git`, so existing credentials
-  (SSH keys, credential helpers) cover private repositories with no
-  extra configuration.
+  `$XDG_CACHE_HOME/docref/`, in a directory keyed by a sha256 of the
+  repository URL (so two distinct repos can never share a clone, and the
+  path length is bounded), fetched at the locked rev. Git is invoked as the
+  system `git`, so existing credentials (SSH keys, credential helpers) cover
+  private repositories with no extra configuration.
 
 <!-- docref: end -->
 - Because snippet bodies are materialized, **serving or rendering the docs never requires access to the referenced repositories**. Only

@@ -8,7 +8,7 @@ description: Enforcing the ref grammar without guessing, and walking up to the p
 The grammar from [References](/format/references) section 1 is enforced here; anything
 outside it is a hard error and the parser never guesses.
 
-```ts docref=packages/core/src/ref.ts#parseRef:5e6d511d
+```ts docref=packages/core/src/ref.ts#parseRef:b54f5326
 export function parseRef(raw: string): Ref {
 	if (!raw) fail(raw, 'empty');
 
@@ -18,7 +18,7 @@ export function parseRef(raw: string): Ref {
 	if (colon !== -1) {
 		alias = rest.slice(0, colon);
 		rest = rest.slice(colon + 1);
-		if (!ALIAS.test(alias)) fail(raw, `alias "${alias}" must match ${ALIAS}`);
+		if (!isKebabName(alias)) fail(raw, `alias "${alias}" must be kebab-case`);
 	}
 
 	let path = rest;
@@ -30,7 +30,7 @@ export function parseRef(raw: string): Ref {
 		if (!frag) fail(raw, 'empty fragment');
 		if (frag.startsWith('@')) {
 			const name = frag.slice(1);
-			if (!REGION.test(name)) fail(raw, `region name "${name}" must be kebab-case`);
+			if (!isKebabName(name)) fail(raw, `region name "${name}" must be kebab-case`);
 			fragment = { kind: 'region', name };
 		} else {
 			if (!SYMBOL.test(frag)) {

@@ -15,7 +15,7 @@ exact field set, including the target id.
 <!-- docref: end -->
 ```
 
-<!-- docref: begin src=packages/core/src/markdown.ts#scanMarkdown:cd8ca97a,packages/core/src/markdown.ts#approveClaims:546d693e -->
+<!-- docref: begin src=packages/core/src/markdown.ts#scanMarkdown:d108e8c0,packages/core/src/markdown.ts#approveClaims:7f2980ad -->
 
 - Claim comments use the same `docref: begin` / `docref: end` grammar
   as region markers. The argument forms differ: a code region takes a

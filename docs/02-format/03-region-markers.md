@@ -31,7 +31,7 @@ parsing:
 
 Rules:
 
-<!-- docref: begin src=packages/core/src/regions.ts#scanRegions:5fcc3f83 -->
+<!-- docref: begin src=packages/core/src/regions.ts#scanRegions:6b2f236c -->
 
 - Recognition pattern: `docref:\s*(begin|end)\s+([a-z0-9][a-z0-9-]*)`.
 - Names are kebab-case and **unique per file**. A duplicate `begin`

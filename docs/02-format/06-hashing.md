@@ -9,7 +9,7 @@ description: How anchored content is whitespace-stripped and hashed so formatter
 hash = lowercase hex sha256( utf8( strip-whitespace( content ) ) )
 ```
 
-<!-- docref: begin src=packages/core/src/hash.ts#stripWhitespace:b0552a8d,packages/core/src/hash.ts#shortHash:67b3653c -->
+<!-- docref: begin src=packages/core/src/hash.ts#stripWhitespace:b0552a8d,packages/core/src/hash.ts#shortHash:efca1888 -->
 
 - `strip-whitespace` removes **every** code point with the Unicode
   `White_Space` property, including newlines. Formatters (Prettier,

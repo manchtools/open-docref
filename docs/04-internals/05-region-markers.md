@@ -8,7 +8,7 @@ description: Recognizing begin/end markers anywhere in a line and reporting unma
 Markers are recognized anywhere in a line, behind any comment leader. Names
 are unique per file; an unmatched or duplicate marker is an error.
 
-```ts docref=packages/core/src/regions.ts#scanRegions:5fcc3f83
+```ts docref=packages/core/src/regions.ts#scanRegions:6b2f236c
 export function scanRegions(source: string): {
 	regions: Map<string, Region>;
 	errors: RegionError[];
@@ -21,7 +21,8 @@ export function scanRegions(source: string): {
 	for (let i = 0; i < lines.length; i++) {
 		const m = MARKER.exec(lines[i]!);
 		if (!m) continue;
-		const [, verb, name] = m as unknown as [string, 'begin' | 'end', string];
+		const verb = m[1]!;
+		const name = m[2]!;
 		const line = i + 1;
 		if (verb === 'begin') {
 			if (regions.has(name) || open.has(name)) {

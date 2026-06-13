@@ -16,7 +16,7 @@ func (s *Server) VerifySignature(req *Request) error {
 ```
 ````
 
-<!-- docref: begin src=packages/core/src/markdown.ts#scanMarkdown:cd8ca97a,packages/core/src/markdown.ts#splitShaSuffix:30ec78f1,packages/core/src/markdown.ts#rewriteSnippets:7dc4de8e,packages/core/src/dedent.ts#dedent:1ded282f -->
+<!-- docref: begin src=packages/core/src/markdown.ts#scanMarkdown:d108e8c0,packages/core/src/markdown.ts#splitShaSuffix:6a2cefbf,packages/core/src/markdown.ts#rewriteSnippets:7dc4de8e,packages/core/src/dedent.ts#dedent:1ded282f -->
 
 - The info string is: language word first (CommonMark convention, so
   syntax highlighting works everywhere), then space-separated

@@ -7,7 +7,7 @@ description: Print paste-ready claim blocks and fully materialized snippet fence
 
 ## `docref claim <ref...>` and `docref snippet <ref>`
 
-<!-- docref: begin src=packages/core/src/ops.ts#resolveReference:32eb60dd,packages/core/src/markdown.ts#claimBlockText:c9edcf37,packages/core/src/markdown.ts#snippetFenceText:ba53537f -->
+<!-- docref: begin src=packages/core/src/ops.ts#resolveReference:3944c21c,packages/core/src/markdown.ts#claimBlockText:2ccb82c7,packages/core/src/markdown.ts#snippetFenceText:ba53537f -->
 
 Print paste-ready text with the shas computed: `claim` emits a claim block (several refs make one multi-source claim), `snippet` emits a fully materialized fence. The shell is the CLI's staging area:
 

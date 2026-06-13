@@ -29,34 +29,73 @@ export type LanguageId =
 	| 'proto';
 ```
 
-That list is *which* files resolve; the table below is *what* each grammar
-exposes as a declaration. TypeScript, JavaScript, TSX, Go and Python use
-bespoke collectors; every other language is data-driven from this set of
-declaration node types. Proto is the notable case: it anchors messages, enums,
-services and rpcs, and (because a field number or enum value number is the
-wire contract, the most drift-prone part of a schema) message fields and enum
-values too, so `CreateRequest.shares` is addressable.
+That list is *which* files resolve; the map below is *what* each grammar
+exposes as a declaration. TypeScript, JavaScript, TSX, Go and Python use bespoke
+collectors; every other language is data-driven — `namedCollector(types, scope)`,
+where `types` is its declaration node types and `scope` (`functionLike` /
+`valueBindings`) marks which nodes open a function body and which are value
+bindings. So a `const`/`val`/`property` inside a function body is treated as a
+local and never collected, exactly as the TypeScript collector does. Proto is the
+notable case: it anchors messages, enums, services and rpcs, and (because a field
+number or enum value number is the wire contract, the most drift-prone part of a
+schema) message fields and enum values too, so `CreateRequest.shares` is
+addressable.
 
-```ts docref=packages/core/src/symbols.ts#NODE_TYPES:bf2d9bd6
-const NODE_TYPES: Record<GenericLanguage, string[]> = {
-	rust: ['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition'],
-	java: ['class_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'annotation_type_declaration', 'method_declaration', 'constructor_declaration'],
-	c: ['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
-	cpp: ['function_definition', 'struct_specifier', 'class_specifier', 'enum_specifier', 'union_specifier', 'namespace_definition', 'type_definition'],
-	csharp: ['class_declaration', 'struct_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'namespace_declaration', 'delegate_declaration', 'method_declaration', 'constructor_declaration', 'property_declaration'],
-	ruby: ['method', 'singleton_method', 'class', 'module'],
-	php: ['function_definition', 'method_declaration', 'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration'],
-	swift: ['function_declaration', 'class_declaration', 'protocol_declaration', 'property_declaration'],
-	kotlin: ['function_declaration', 'class_declaration', 'object_declaration', 'property_declaration'],
-	scala: ['function_definition', 'class_definition', 'object_definition', 'trait_definition', 'type_definition', 'val_definition'],
-	bash: ['function_definition'],
+```ts docref=packages/core/src/symbols.ts#COLLECTORS:73c11951
+const COLLECTORS: Record<LanguageId, Collector> = {
+	typescript: collectTsLike,
+	tsx: collectTsLike,
+	javascript: collectTsLike,
+	go: collectGo,
+	python: collectPython,
+	rust: namedCollector(
+		['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition'],
+		{ functionLike: ['function_item'], valueBindings: ['const_item', 'static_item'] }
+	),
+	java: namedCollector(
+		['class_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'annotation_type_declaration', 'method_declaration', 'constructor_declaration'],
+		{ functionLike: ['method_declaration', 'constructor_declaration'] }
+	),
+	c: namedCollector(
+		['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
+		{ functionLike: ['function_definition'] }
+	),
+	cpp: namedCollector(
+		['function_definition', 'struct_specifier', 'class_specifier', 'enum_specifier', 'union_specifier', 'namespace_definition', 'type_definition'],
+		{ functionLike: ['function_definition'] }
+	),
+	csharp: namedCollector(
+		['class_declaration', 'struct_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'namespace_declaration', 'delegate_declaration', 'method_declaration', 'constructor_declaration', 'property_declaration'],
+		{ functionLike: ['method_declaration', 'constructor_declaration'] }
+	),
+	ruby: namedCollector(['method', 'singleton_method', 'class', 'module'], {
+		functionLike: ['method', 'singleton_method']
+	}),
+	php: namedCollector(
+		['function_definition', 'method_declaration', 'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration'],
+		{ functionLike: ['function_definition', 'method_declaration'] }
+	),
+	swift: namedCollector(['function_declaration', 'class_declaration', 'protocol_declaration', 'property_declaration'], {
+		functionLike: ['function_declaration'],
+		valueBindings: ['property_declaration']
+	}),
+	kotlin: namedCollector(['function_declaration', 'class_declaration', 'object_declaration', 'property_declaration'], {
+		functionLike: ['function_declaration'],
+		valueBindings: ['property_declaration']
+	}),
+	scala: namedCollector(
+		['function_definition', 'class_definition', 'object_definition', 'trait_definition', 'type_definition', 'val_definition'],
+		{ functionLike: ['function_definition'], valueBindings: ['val_definition'] }
+	),
+	bash: namedCollector(['function_definition'], { functionLike: ['function_definition'] }),
 	// proto: message (type-like), enum, service (interface-like), rpc
 	// (method-like), plus message fields and enum values. Unlike struct fields
 	// elsewhere, a proto field/value number is the wire contract and the most
 	// drift-prone thing in a schema, so `Message.field` is addressable. `field`
 	// covers oneof members too (the grammar reuses it); `value` is the enum
 	// constant. Field options/defaults are other node types and are not swept in.
-	proto: ['message', 'enum', 'service', 'rpc', 'field', 'map_field', 'value']
+	// No function bodies, so no scope flags.
+	proto: namedCollector(['message', 'enum', 'service', 'rpc', 'field', 'map_field', 'value'])
 };
 ```
 

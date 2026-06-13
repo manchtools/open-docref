@@ -5,7 +5,7 @@ description: Symbol fragments, structural tree-sitter resolution, and the `@` si
 
 # Symbols
 
-<!-- docref: begin src=packages/core/src/symbols.ts#listDeclarations:f87e8a33 -->
+<!-- docref: begin src=packages/core/src/symbols.ts#listDeclarations:e4a10ace -->
 
 A symbol fragment names a declaration: function, method, class, type,
 interface, enum, or top-level constant; and, where a language makes a

@@ -32,14 +32,14 @@ code, and a doc points at it with `file#@name`:
 // docref: end <name>
 ```
 
-<!-- docref: begin src=packages/core/src/regions.ts#scanRegions:5fcc3f83 -->
+<!-- docref: begin src=packages/core/src/regions.ts#scanRegions:6b2f236c -->
 Marker names are kebab-case and unique per file; an unmatched or duplicate
 marker is an error.
 <!-- docref: end -->
 
 Two things this means when you work here:
 
-<!-- docref: begin src=packages/core/src/ops.ts#findUnusedAnchors:9e39e6cb,packages/core/src/ops.ts#exitCode:926bfd35 -->
+<!-- docref: begin src=packages/core/src/ops.ts#findUnusedAnchors:9e39e6cb,packages/core/src/ops.ts#exitCode:57a1b5ed -->
 - `docref check` reports an **unused anchor** when a marker pair has no doc
   referencing it, and that fails the gate (exit 1) unless `[anchors]
   allow-unused = true` in `docref.toml`. Either reference the marker from a

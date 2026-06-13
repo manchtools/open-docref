@@ -22,7 +22,7 @@ open-secret:src/api/handler.go#VerifySignature cross repo, symbol
 config/default.toml                            same repo, whole file
 ```
 
-<!-- docref: begin src=packages/core/src/ref.ts#parseRef:5e6d511d,packages/core/src/resolve.ts#resolveAnchor:9908f20d -->
+<!-- docref: begin src=packages/core/src/ref.ts#parseRef:b54f5326,packages/core/src/resolve.ts#resolveAnchor:9908f20d -->
 
 - **No fragment** means the whole file is the anchor.
 - **No alias** means the containing repository; the ref resolves

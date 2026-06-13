@@ -7,7 +7,7 @@ description: Map a code change to the documents it endangers, and surface prose 
 
 ## `docref affected --since <rev> [--json]`
 
-<!-- docref: begin src=packages/core/src/ops.ts#affected:27797135 -->
+<!-- docref: begin src=packages/core/src/ops.ts#affected:4b5afee5 -->
 
 Map a change to the documents it endangers: diff the working tree (or `HEAD`) against `<rev>`, intersect changed line spans with anchor spans (symbols, regions, whole files), and list every snippet and claim referencing an affected anchor. This is the primary agent entry point and the pre-push answer to "which docs do I owe an update?".
 
@@ -21,7 +21,7 @@ of scope.
 
 ## `docref suggest [--json]`
 
-<!-- docref: begin src=packages/core/src/ops.ts#suggest:83e6a8a0 -->
+<!-- docref: begin src=packages/core/src/ops.ts#suggest:c562ad5d -->
 
 The coverage gap-finder, the inverse of drift: `check` tells you when an existing anchor goes stale; `suggest` surfaces prose that *should* be a claim and isn't. It indexes every symbol and region marker in the `[anchors]` file set (each symbol by both its bare name and its qualified `Container.member` path, so wire-contract prose like `Message.field` matches where the bare leaf would be ambiguous), then scans each document's prose, outside fenced code and outside existing references, for an inline-code identifier that resolves to exactly one anchor. Each hit is a candidate unanchored claim: the document, the line, the identifier, and the ref it would carry. Heuristic and informational (always exit `0`); the reader decides whether the prose is really a claim worth pinning.
 

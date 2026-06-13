@@ -38,7 +38,7 @@ Or do it by hand: download the `.vsix` from the
 code --install-extension open-docref-vscode-<version>.vsix
 ```
 
-<!-- docref: begin src=packages/cli/src/selfupdate.ts#selfUpdate:f78ac557 -->
+<!-- docref: begin src=packages/cli/src/selfupdate.ts#selfUpdate:2a6b5200 -->
 `docref self-update` refreshes both the binary and the installed extension
 together, so the editor never lags the CLI.
 <!-- docref: end -->
