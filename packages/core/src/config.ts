@@ -22,7 +22,14 @@ const DEFAULT_INCLUDE = ['**/*.md'];
 const ALWAYS_EXCLUDE = ['**/node_modules/**', '**/.git/**'];
 
 function toml(path: string): Record<string, unknown> {
-	return parseToml(readFileSync(path, 'utf8')) as Record<string, unknown>;
+	const text = readFileSync(path, 'utf8'); // a missing file is existsSync-guarded
+	try {
+		return parseToml(text) as Record<string, unknown>;
+	} catch (e) {
+		// a raw smol-toml TomlError is unclassifiable and in a foreign voice;
+		// give it the same code as every other config error and name the file
+		throw new DocrefError('invalid-config', `${path}: ${(e as Error).message}`);
+	}
 }
 
 export function loadProject(root: string): Project {

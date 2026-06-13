@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadProject } from './config';
 import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode, suggest } from './ops';
@@ -563,6 +563,37 @@ describe('diff: recovering what the approver saw', () => {
 		expect(entries[0]?.note).toBeTruthy();
 	});
 
+	it('attributes each drifted source its OWN failure, not the first one', async () => {
+		// a two-source claim where BOTH sources go missing after approval: each
+		// drift entry must carry its own source's reason. The old code stored only
+		// the first failure claim-wide, so the second source showed the first's text.
+		const root = tmp();
+		initRepo(root);
+		write(root, 'src/a.ts', 'export function greet(): string {\n\treturn "hi";\n}\n');
+		write(root, 'src/b.ts', 'export function farewell(): string {\n\treturn "bye";\n}\n');
+		write(
+			root,
+			'docs/claim.md',
+			[
+				'<!-- docref: begin src=src/a.ts#greet,src/b.ts#farewell -->',
+				'Greets and bids farewell.',
+				'<!-- docref: end -->',
+				''
+			].join('\n')
+		);
+		await approve(loadProject(root), ['docs/claim.md']);
+		commitAll(root, 'approved both');
+		// delete both sources in the working tree (history still has them)
+		rmSync(join(root, 'src/a.ts'));
+		rmSync(join(root, 'src/b.ts'));
+
+		const { entries } = await diff(loadProject(root));
+		const aEntry = entries.find((e) => e.ref === 'src/a.ts#greet');
+		const bEntry = entries.find((e) => e.ref === 'src/b.ts#farewell');
+		expect(aEntry?.note).toContain('src/a.ts');
+		expect(bEntry?.note).toContain('src/b.ts'); // old code would show src/a.ts here
+	});
+
 	it('excludes snippets and up-to-date claims', async () => {
 		const root = gitProject();
 		write(root, 'docs/snip.md', '```ts docref=src/lib.ts#greet\n```\n');
@@ -693,6 +724,36 @@ describe('suggest: candidate unanchored claims', () => {
 		const { suggestions } = await suggest(loadProject(root));
 		expect(suggestions).toEqual([
 			{ doc: 'docs/x.md', line: 3, identifier: 'greet', refs: ['src/lib.ts#greet'] }
+		]);
+	});
+
+	it('tracks fence char and length: a ~~~ run does not close a ``` block', async () => {
+		// the crude toggle (any fence line flips in/out) mis-pairs here: the ~~~
+		// inside the ```ts block reads as a close, so the in-fence `greet` is
+		// (wrongly) suggested and the real prose `greet` after the block is
+		// (wrongly) dropped. Char+length tracking keeps the block intact.
+		const root = tmp();
+		write(root, 'docref.toml', '[anchors]\nallow-unused = true\n');
+		write(root, 'src/lib.ts', 'export function greet(n){return n}\n');
+		write(
+			root,
+			'docs/x.md',
+			[
+				'# Doc', // 1
+				'', // 2
+				'```ts', // 3 opens a ``` fence
+				'const x = 1;', // 4
+				'~~~', // 5 a tilde run does NOT close a backtick fence
+				'`greet` is inside the code fence', // 6 -> must NOT be suggested
+				'```', // 7 closes the fence
+				'', // 8
+				'The `greet` helper greets.', // 9 -> the only real prose mention
+				'' // 10
+			].join('\n')
+		);
+		const { suggestions } = await suggest(loadProject(root));
+		expect(suggestions).toEqual([
+			{ doc: 'docs/x.md', line: 9, identifier: 'greet', refs: ['src/lib.ts#greet'] }
 		]);
 	});
 

@@ -12,8 +12,15 @@ export type Ref = {
 	fragment?: Fragment;
 };
 
-const ALIAS = /^[a-z0-9][a-z0-9-]*$/;
-const REGION = /^[a-z0-9][a-z0-9-]*$/;
+// The body of a kebab-case identifier (no anchors): lowercase alnum start,
+// internal hyphens. The single source of truth for the shape of a repo alias,
+// a region name (this file), and the region MARKER (regions.ts) — they must not
+// drift apart. regions.ts composes its line-scanning regex from KEBAB_BODY.
+export const KEBAB_BODY = '[a-z0-9][a-z0-9-]*';
+export const KEBAB_NAME = new RegExp(`^${KEBAB_BODY}$`);
+/** Whether a string is a kebab-case name (alias / region name). */
+export const isKebabName = (s: string): boolean => KEBAB_NAME.test(s);
+
 const SYMBOL = /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 
 function fail(raw: string, why: string): never {
@@ -29,7 +36,7 @@ export function parseRef(raw: string): Ref {
 	if (colon !== -1) {
 		alias = rest.slice(0, colon);
 		rest = rest.slice(colon + 1);
-		if (!ALIAS.test(alias)) fail(raw, `alias "${alias}" must match ${ALIAS}`);
+		if (!isKebabName(alias)) fail(raw, `alias "${alias}" must be kebab-case`);
 	}
 
 	let path = rest;
@@ -41,7 +48,7 @@ export function parseRef(raw: string): Ref {
 		if (!frag) fail(raw, 'empty fragment');
 		if (frag.startsWith('@')) {
 			const name = frag.slice(1);
-			if (!REGION.test(name)) fail(raw, `region name "${name}" must be kebab-case`);
+			if (!isKebabName(name)) fail(raw, `region name "${name}" must be kebab-case`);
 			fragment = { kind: 'region', name };
 		} else {
 			if (!SYMBOL.test(frag)) {

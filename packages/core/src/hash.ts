@@ -17,20 +17,27 @@ export function contentHash(content: string): string {
 	return createHash('sha256').update(stripWhitespace(content), 'utf8').digest('hex');
 }
 
+/**
+ * The displayed/compared hash width. The single source of truth for the short
+ * form: the prefix `shortHash` emits and the minimum `hashesMatch` will compare
+ * derive from it, so the display width and the comparison floor cannot desync.
+ */
+export const SHORT_HASH_LEN = 8;
+
 export function shortHash(content: string): string {
-	return contentHash(content).slice(0, 8);
+	return contentHash(content).slice(0, SHORT_HASH_LEN);
 }
 
 /**
  * Compare a stored hash against another (either may be a prefix). Matching
- * needs at least 8 hex characters on both sides; anything thinner is
- * treated as a mismatch so a truncated value can never approve by accident.
+ * needs at least SHORT_HASH_LEN hex characters on both sides; anything thinner
+ * is treated as a mismatch so a truncated value can never approve by accident.
  */
 export function hashesMatch(a: string | undefined, b: string | undefined): boolean {
 	if (!a || !b) return false;
 	const la = a.toLowerCase();
 	const lb = b.toLowerCase();
-	if (la.length < 8 || lb.length < 8) return false;
+	if (la.length < SHORT_HASH_LEN || lb.length < SHORT_HASH_LEN) return false;
 	if (!/^[0-9a-f]+$/.test(la) || !/^[0-9a-f]+$/.test(lb)) return false;
 	return la.startsWith(lb) || lb.startsWith(la);
 }

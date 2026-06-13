@@ -1,5 +1,7 @@
 // File-extension to grammar mapping for symbol resolution. Unsupported
 // extensions fail closed at the call site; regions work in any language.
+import { parseRef } from './ref';
+
 export type LanguageId =
 	| 'typescript'
 	| 'tsx'
@@ -60,4 +62,20 @@ export function languageForFile(path: string): LanguageInfo | null {
 	const dot = path.lastIndexOf('.');
 	if (dot === -1) return null;
 	return BY_EXT[path.slice(dot + 1).toLowerCase()] ?? null;
+}
+
+/**
+ * The fence info-string language word for a ref: the extension of its path, or
+ * '' when the path has none (a dotless basename or a leading-dot file). Uses the
+ * real ref grammar to strip any alias and `#fragment`, so `lib:src/a.ts#sym`
+ * yields `ts`. This is the raw extension that labels a markdown code fence — NOT
+ * a grammar id (no `ts`->`typescript` rewrite). Throws if `ref` is not a valid
+ * ref; callers passing untrusted input should guard.
+ */
+export function fenceLanguageForRef(ref: string): string {
+	const { path } = parseRef(ref);
+	const slash = path.lastIndexOf('/');
+	const base = slash === -1 ? path : path.slice(slash + 1);
+	const dot = base.lastIndexOf('.');
+	return dot <= 0 ? '' : base.slice(dot + 1);
 }

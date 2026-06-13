@@ -3,9 +3,12 @@
 // Names are kebab-case and unique per file; end always carries the name;
 // marker lines are excluded from extraction. The negative lookahead keeps
 // the attribute form (pin blocks, "src=...") from reading as a name.
-import { DocrefError } from './errors';
+import { KEBAB_BODY } from './ref';
 
-const MARKER = /docref:\s*(begin|end)\s+([a-z0-9][a-z0-9-]*)(?![A-Za-z0-9=_-])/;
+// Composed from the shared kebab body so the marker grammar and the ref grammar
+// cannot drift. The negative lookahead keeps the attribute form (src=...) from
+// reading as a name.
+const MARKER = new RegExp(`docref:\\s*(begin|end)\\s+(${KEBAB_BODY})(?![A-Za-z0-9=_-])`);
 
 export type Region = { beginLine: number; endLine: number };
 export type RegionError = { line: number; code: string; message: string };
@@ -22,7 +25,8 @@ export function scanRegions(source: string): {
 	for (let i = 0; i < lines.length; i++) {
 		const m = MARKER.exec(lines[i]!);
 		if (!m) continue;
-		const [, verb, name] = m as unknown as [string, 'begin' | 'end', string];
+		const verb = m[1]!;
+		const name = m[2]!;
 		const line = i + 1;
 		if (verb === 'begin') {
 			if (regions.has(name) || open.has(name)) {
@@ -46,17 +50,4 @@ export function scanRegions(source: string): {
 	}
 
 	return { regions, errors };
-}
-
-export function extractRegion(source: string, name: string): string {
-	const { regions, errors } = scanRegions(source);
-	if (errors.length > 0) {
-		const e = errors[0]!;
-		throw new DocrefError('region-error', `line ${e.line}: ${e.message}`);
-	}
-	const region = regions.get(name);
-	if (!region) {
-		throw new DocrefError('region-not-found', `region "${name}" not found`);
-	}
-	return source.split('\n').slice(region.beginLine, region.endLine - 1).join('\n');
 }

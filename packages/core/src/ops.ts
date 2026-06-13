@@ -9,13 +9,19 @@ import { glob } from 'tinyglobby';
 import type { Project } from './config';
 import { writeLock } from './config';
 import { DocrefError } from './errors';
-import { contentHash, hashesMatch } from './hash';
+import { contentHash, shortHash, hashesMatch, SHORT_HASH_LEN } from './hash';
 import { parseRef } from './ref';
 import {
 	scanMarkdown,
 	rewriteSnippets,
 	approveClaims,
-	splitShaSuffix,
+	parseRefWithSha,
+	withRefValue,
+	buildSrcValue,
+	renderClaimBegin,
+	maskFences,
+	eachLine,
+	type Reference,
 	type Snippet,
 	type Claim,
 	type SnippetEdit
@@ -51,20 +57,43 @@ export type Report = {
 	summary: { upToDate: number; staleSnippet: number; staleClaim: number; broken: number };
 };
 
+/** Process exit codes (tooling.md): everything current / drift present / broken
+ * or usage error. Named so the CLI does not scatter 0/1/2 literals. */
+export const EXIT = { ok: 0, stale: 1, broken: 2 } as const;
+
 export function exitCode(report: Report): 0 | 1 | 2 {
 	const s = report.summary;
-	if (report.errors.length > 0 || s.broken > 0) return 2;
-	if (s.staleSnippet > 0 || s.staleClaim > 0 || report.unusedAnchors.length > 0) return 1;
-	return 0;
+	if (report.errors.length > 0 || s.broken > 0) return EXIT.broken;
+	if (s.staleSnippet > 0 || s.staleClaim > 0 || report.unusedAnchors.length > 0) return EXIT.stale;
+	return EXIT.ok;
+}
+
+function assertNever(x: never): never {
+	throw new DocrefError('internal', `unhandled report state: ${String(x)}`);
 }
 
 function summarize(entries: ReportEntry[]): Report['summary'] {
-	return {
-		upToDate: entries.filter((e) => e.state === 'up-to-date').length,
-		staleSnippet: entries.filter((e) => e.state === 'stale-snippet').length,
-		staleClaim: entries.filter((e) => e.state === 'stale-claim').length,
-		broken: entries.filter((e) => e.state === 'broken').length
-	};
+	const summary = { upToDate: 0, staleSnippet: 0, staleClaim: 0, broken: 0 };
+	for (const e of entries) {
+		switch (e.state) {
+			case 'up-to-date':
+				summary.upToDate++;
+				break;
+			case 'stale-snippet':
+				summary.staleSnippet++;
+				break;
+			case 'stale-claim':
+				summary.staleClaim++;
+				break;
+			case 'broken':
+				summary.broken++;
+				break;
+			// a new State must be enumerated here, not silently miscounted
+			default:
+				assertNever(e.state);
+		}
+	}
+	return summary;
 }
 
 async function docFiles(project: Project, paths?: string[]): Promise<string[]> {
@@ -110,9 +139,22 @@ type DocEvaluation = {
 	entries: ReportEntry[];
 	errors: ReportError[];
 	snippetEdits: SnippetEdit[];
-	claims: { carrier: Claim; anchors: (Anchor | null)[]; reason?: string }[];
+	claims: {
+		carrier: Claim;
+		anchors: (Anchor | null)[];
+		/** per source, in order; undefined when that source resolved */
+		reasons: (string | undefined)[];
+		/** the first failure, claim-wide, for single-line consumers */
+		reason?: string;
+	}[];
 	text: string;
 };
+
+/** Narrow to "every source resolved" — the type-system form of the runtime
+ * invariant that a claim with no `reason` has no null anchors. */
+function allResolved(anchors: (Anchor | null)[]): anchors is Anchor[] {
+	return anchors.every((a) => a !== null);
+}
 
 async function evaluateDoc(
 	doc: string,
@@ -146,7 +188,7 @@ async function evaluateDoc(
 				continue;
 			}
 			const current = contentHash(anchor.content);
-			const cur8 = current.slice(0, 8);
+			const cur8 = current.slice(0, SHORT_HASH_LEN);
 			const upToDate = hashesMatch(c.sha, current) && contentHash(c.body) === current;
 			if (!upToDate) out.snippetEdits.push({ carrier: c, body: anchor.content, sha: cur8 });
 			out.entries.push({
@@ -161,17 +203,21 @@ async function evaluateDoc(
 		// a claim may pin several anchors; broken if ANY fails, stale if
 		// ANY drifted, approved only as a whole
 		const anchors: (Anchor | null)[] = [];
+		const reasons: (string | undefined)[] = [];
 		let reason: string | undefined;
 		for (const r of c.refs) {
 			try {
 				const ref = parseRef(r);
 				anchors.push(await resolveAnchor(sourceFor(ref.alias), ref));
+				reasons.push(undefined);
 			} catch (e) {
+				const msg = (e as Error).message;
 				anchors.push(null);
-				reason ??= (e as Error).message;
+				reasons.push(msg);
+				reason ??= msg;
 			}
 		}
-		out.claims.push({ carrier: c, anchors, ...(reason ? { reason } : {}) });
+		out.claims.push({ carrier: c, anchors, reasons, ...(reason ? { reason } : {}) });
 		const pinned = c.shas.some(Boolean)
 			? c.shas.map((s) => s ?? 'unapproved').join(',')
 			: undefined;
@@ -179,13 +225,16 @@ async function evaluateDoc(
 			out.entries.push({ ...base, state: 'broken', ...(pinned ? { pinned } : {}), reason });
 			continue;
 		}
-		const currents = anchors.map((a) => contentHash(a!.content));
+		// reason unset ⟹ no null anchors; assert it for the type system rather
+		// than `a!`, so a future change to the resolve loop fails closed here
+		if (!allResolved(anchors)) continue;
+		const currents = anchors.map((a) => contentHash(a.content));
 		const upToDate = currents.every((h, k) => hashesMatch(c.shas[k], h));
 		out.entries.push({
 			...base,
 			state: upToDate ? 'up-to-date' : 'stale-claim',
 			...(pinned ? { pinned } : {}),
-			current: currents.map((h) => h.slice(0, 8)).join(',')
+			current: currents.map((h) => h.slice(0, SHORT_HASH_LEN)).join(',')
 		});
 	}
 
@@ -233,10 +282,9 @@ export async function resolveReference(
 	project: Project,
 	refRaw: string
 ): Promise<{ ref: string; sha: string; content: string }> {
-	const bare = splitShaSuffix(refRaw).ref;
-	const ref = parseRef(bare);
+	const { ref, bare } = parseRefWithSha(refRaw);
 	const anchor = await resolveAnchor(sourcePool(project)(ref.alias), ref);
-	return { ref: bare, sha: contentHash(anchor.content).slice(0, 8), content: anchor.content };
+	return { ref: bare, sha: shortHash(anchor.content), content: anchor.content };
 }
 
 /** Resolve and report every reference. Writes nothing. */
@@ -283,7 +331,8 @@ export async function approve(
 	for (const [doc, ev] of evaluations) {
 		const edits = [];
 		for (const claim of ev.claims) {
-			if (claim.anchors.some((a) => a === null)) {
+			const anchors = claim.anchors;
+			if (!allResolved(anchors)) {
 				refused.push({
 					doc,
 					line: claim.carrier.openLine,
@@ -296,7 +345,7 @@ export async function approve(
 			}
 			edits.push({
 				carrier: claim.carrier,
-				shas: claim.anchors.map((a) => contentHash(a!.content).slice(0, 8))
+				shas: anchors.map((a) => shortHash(a.content))
 			});
 			approved++;
 		}
@@ -436,10 +485,12 @@ export async function diff(
 				const entry: ClaimDriftEntry = { doc, line: c.openLine, ref: refRaw };
 				if (sha) entry.pinned = sha;
 				if (anchor) {
-					entry.current = contentHash(anchor.content).slice(0, 8);
+					entry.current = shortHash(anchor.content);
 					entry.currentContent = anchor.content;
-				} else if (claim.reason) {
-					entry.note = claim.reason;
+				} else {
+					// this source's own failure, not whichever failed first
+					const why = claim.reasons[k];
+					if (why) entry.note = why;
 				}
 
 				if (!sha) {
@@ -485,7 +536,7 @@ export async function remove(
 	project: Project,
 	refRaw: string
 ): Promise<{ docsChanged: string[]; referencesRemoved: number; markersRemoved: number }> {
-	const target = splitShaSuffix(refRaw).ref;
+	const { ref: targetRef, bare: target } = parseRefWithSha(refRaw);
 	let referencesRemoved = 0;
 	const docsChanged: string[] = [];
 
@@ -512,17 +563,11 @@ export async function remove(
 				ops.push({ kind: 'delete', from: c.closeLine, to: c.closeLine });
 				ops.push({ kind: 'delete', from: c.openLine, to: c.openLine });
 			} else {
-				const value = c.refs
-					.map((r, k) => ({ r, sha: c.shas[k] }))
-					.filter((_, k) => k !== at)
-					.map((s) => (s.sha ? `${s.r}:${s.sha}` : s.r))
-					.join(',');
-				const tokens = c.tokens.map((t) => (t.startsWith('src=') ? `src=${value}` : t));
-				ops.push({
-					kind: 'replace',
-					line: c.openLine,
-					text: `${c.indent}<!-- docref: begin ${tokens.join(' ')} -->`
-				});
+				const remaining = c.refs
+					.map((r, k) => ({ ref: r, sha: c.shas[k] }))
+					.filter((_, k) => k !== at);
+				const tokens = withRefValue(c.tokens, 'src', buildSrcValue(remaining));
+				ops.push({ kind: 'replace', line: c.openLine, text: renderClaimBegin(c.indent, tokens) });
 			}
 		}
 		if (ops.length === 0) continue;
@@ -540,22 +585,27 @@ export async function remove(
 	}
 
 	let markersRemoved = 0;
-	const ref = parseRef(target);
-	if (!ref.alias && ref.fragment?.kind === 'region') {
+	if (!targetRef.alias && targetRef.fragment?.kind === 'region') {
+		const abs = join(project.root, targetRef.path);
+		// only the read is allowed to fail soft (the source may not exist); the
+		// splice and write run outside the catch, so a write failure mid-edit
+		// propagates loudly instead of masquerading as a clean no-op
+		let srcText: string | null;
 		try {
-			const abs = join(project.root, ref.path);
-			const text = readFileSync(abs, 'utf8');
-			const { regions, errors } = scanRegions(text);
-			const region = errors.length === 0 ? regions.get(ref.fragment.name) : undefined;
+			srcText = readFileSync(abs, 'utf8');
+		} catch {
+			srcText = null; // source file unreadable: nothing to remove there
+		}
+		if (srcText !== null) {
+			const { regions, errors } = scanRegions(srcText);
+			const region = errors.length === 0 ? regions.get(targetRef.fragment.name) : undefined;
 			if (region) {
-				const lines = text.split('\n');
+				const lines = srcText.split('\n');
 				lines.splice(region.endLine - 1, 1);
 				lines.splice(region.beginLine - 1, 1);
 				writeFileSync(abs, lines.join('\n'));
 				markersRemoved = 1;
 			}
-		} catch {
-			// source file unreadable: nothing to remove there
 		}
 	}
 
@@ -619,7 +669,7 @@ export async function affected(
 		const text = readFileSync(join(project.root, doc), 'utf8');
 		const { references } = scanMarkdown(text);
 		for (const c of references) {
-			for (const refRaw of c.kind === 'claim' ? c.refs : [c.ref]) {
+			for (const refRaw of refsOf(c)) {
 				let ref;
 				try {
 					ref = parseRef(refRaw);
@@ -673,25 +723,10 @@ export type AnchorsResult = {
 	errors: { file: string; line: number; code: string; message: string }[];
 };
 
-/** Blank out fenced-code lines so marker EXAMPLES in markdown are not anchors. */
-function withoutFences(text: string): string {
-	const lines = text.split('\n');
-	let fence: { char: string; len: number } | null = null;
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]!;
-		if (fence) {
-			const close = new RegExp(`^\\s*${fence.char === '`' ? '`' : '~'}{${fence.len},}\\s*$`);
-			if (close.test(line)) fence = null;
-			lines[i] = '';
-			continue;
-		}
-		const open = /^\s*(`{3,}|~{3,})/.exec(line);
-		if (open) {
-			fence = { char: open[1]![0]!, len: open[1]!.length };
-			lines[i] = '';
-		}
-	}
-	return lines.join('\n');
+/** The refs a reference pins: a claim's source list, or a snippet's single ref.
+ * Claims keep `refs` (the parsed list), never the comma-joined display `ref`. */
+function refsOf(c: Reference): string[] {
+	return c.kind === 'claim' ? c.refs : [c.ref];
 }
 
 export async function anchorFiles(project: Project): Promise<string[]> {
@@ -726,7 +761,7 @@ export async function anchors(project: Project): Promise<AnchorsResult> {
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
 		for (const c of scanMarkdown(text).references) {
-			for (const r of c.kind === 'claim' ? c.refs : [c.ref]) {
+			for (const r of refsOf(c)) {
 				try {
 					const ref = parseRef(r);
 					if (ref.alias || ref.fragment?.kind !== 'region') continue;
@@ -752,7 +787,7 @@ export async function anchors(project: Project): Promise<AnchorsResult> {
 			continue;
 		}
 		if (text.includes('\u0000') || !text.includes('docref:')) continue;
-		const scannable = /\.(md|mdx|markdown)$/i.test(file) ? withoutFences(text) : text;
+		const scannable = /\.(md|mdx|markdown)$/i.test(file) ? maskFences(text) : text;
 		const { regions, errors } = scanRegions(scannable);
 		result.errors.push(...errors.map((e) => ({ file, ...e })));
 		for (const [name, region] of regions) {
@@ -775,7 +810,7 @@ export async function ls(project: Project): Promise<RefIndex> {
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
 		for (const c of scanMarkdown(text).references) {
-			for (const r of c.kind === 'claim' ? c.refs : [c.ref]) {
+			for (const r of refsOf(c)) {
 				const locations = byRef.get(r) ?? [];
 				locations.push({ doc, line: c.openLine, kind: c.kind });
 				byRef.set(r, locations);
@@ -847,27 +882,23 @@ export async function suggest(project: Project): Promise<{ suggestions: SuggestE
 	for (const doc of await docFiles(project)) {
 		const text = readFileSync(join(project.root, doc), 'utf8');
 		const covered = referencedLines(text);
-		const lines = text.split('\n');
 		const seen = new Set<string>();
-		let inFence = false;
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i]!;
-			if (/^\s*(`{3,}|~{3,})/.test(line)) {
-				inFence = !inFence;
-				continue;
-			}
-			if (inFence || covered.has(i + 1)) continue;
+		// fence tracking via the shared, char+length-aware iterator: a ~~~ run
+		// does not end a ``` block, so example code never reads as prose (and
+		// real prose after such a block is never swallowed)
+		for (const { line, index, inFence } of eachLine(text)) {
+			if (inFence || covered.has(index + 1)) continue;
 			for (const m of line.matchAll(/`([^`\n]+)`/g)) {
 				const token = m[1]!.replace(/^@/, '').trim();
 				if (!IDENT.test(token)) continue;
 				const refs = [...(symbols.get(token) ?? []), ...(regions.get(token) ?? [])];
-				const key = `${i + 1}\0${token}`;
+				const key = `${index + 1}\0${token}`;
 				// only an UNAMBIGUOUS match (one anchor in the tree) — which is also
 				// exactly what `#token` would resolve to, so it is anchorable as
 				// written. Ambiguous names (a leaf in several files) are noise.
 				if (refs.length === 1 && !seen.has(key)) {
 					seen.add(key);
-					suggestions.push({ doc, line: i + 1, identifier: token, refs });
+					suggestions.push({ doc, line: index + 1, identifier: token, refs });
 				}
 			}
 		}

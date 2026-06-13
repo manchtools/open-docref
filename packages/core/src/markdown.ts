@@ -3,8 +3,12 @@
 // scanner is fence-aware so example fences inside longer fences and claim
 // syntax inside code blocks are content, never references. Malformed
 // references are hard errors.
-import { parseRef } from './ref';
-import { DocrefError } from './errors';
+import { parseRef, type Ref } from './ref';
+
+// The claim marker's literal close line. The emitters below and the CLAIM_END
+// scanner below it both key off the same syntax; keeping the emitted form in one
+// const keeps the round-trip honest.
+const CLAIM_END_LINE = '<!-- docref: end -->';
 
 export type Snippet = {
 	kind: 'snippet';
@@ -49,21 +53,31 @@ type Attrs = { ref?: string; refs?: string[]; shas?: (string | undefined)[] };
  * fragments cannot contain colons, so the two never collide.
  */
 export function splitShaSuffix(part: string): { ref: string; sha?: string } {
+	const { bare, sha } = parseRefWithSha(part);
+	return sha !== undefined ? { ref: bare, sha } : { ref: bare };
+}
+
+/**
+ * Like {@link splitShaSuffix}, but also returns the parsed {@link Ref}, so a
+ * caller that needs the Ref (resolveReference, remove) does not re-parse the
+ * bare string a second time. `bare` is the ref without its `:sha` suffix.
+ */
+export function parseRefWithSha(part: string): { ref: Ref; bare: string; sha?: string } {
 	const at = part.lastIndexOf(':');
 	if (at > 0) {
 		const suffix = part.slice(at + 1);
 		if (SHA.test(suffix)) {
 			const bare = part.slice(0, at);
 			try {
-				parseRef(bare);
-				return { ref: bare, sha: suffix.toLowerCase() };
+				const ref = parseRef(bare);
+				return { ref, bare, sha: suffix.toLowerCase() };
 			} catch {
 				// the colon belonged to the ref itself; validate it whole
 			}
 		}
 	}
-	parseRef(part); // throws on an invalid ref
-	return { ref: part };
+	const ref = parseRef(part); // throws on an invalid ref
+	return { ref, bare: part };
 }
 
 /**
@@ -116,6 +130,63 @@ function readAttrs(
 	return attrs;
 }
 
+type Fence = { char: string; len: number };
+
+/** The fence a line opens (>=3 backticks or tildes), or null. */
+function fenceOpen(line: string): Fence | null {
+	const m = FENCE_OPEN.exec(line);
+	if (!m) return null;
+	const run = m[2]!;
+	return { char: run[0]!, len: run.length };
+}
+
+/**
+ * Whether `line` closes `fence`: a run of the SAME char, at least as long,
+ * alone on the line. Neither backtick nor tilde is a regex metacharacter, so
+ * the char interpolates literally.
+ */
+function fenceCloses(line: string, fence: Fence): boolean {
+	return new RegExp(`^\\s*${fence.char}{${fence.len},}\\s*$`).test(line);
+}
+
+/**
+ * The one fence model, shared by every fence-aware pass. Yields each line with
+ * whether it lies inside a fenced code block; the delimiter lines themselves
+ * report inFence:true (they are markup, not prose). Char- and length-aware, so
+ * a ``` run never closes a ~~~ fence and a shorter run never closes a longer
+ * one — exactly scanMarkdown's rule.
+ */
+export function* eachLine(text: string): Generator<{ line: string; index: number; inFence: boolean }> {
+	const lines = text.split('\n');
+	let fence: Fence | null = null;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		if (fence) {
+			const closes = fenceCloses(line, fence);
+			yield { line, index: i, inFence: true };
+			if (closes) fence = null;
+			continue;
+		}
+		const open = fenceOpen(line);
+		if (open) {
+			fence = open;
+			yield { line, index: i, inFence: true };
+			continue;
+		}
+		yield { line, index: i, inFence: false };
+	}
+}
+
+/**
+ * Blank every fenced-code line (delimiters included) while preserving line
+ * numbers, so marker EXAMPLES inside prose are never mistaken for real anchors.
+ */
+export function maskFences(text: string): string {
+	const out: string[] = [];
+	for (const { line, inFence } of eachLine(text)) out.push(inFence ? '' : line);
+	return out.join('\n');
+}
+
 export function scanMarkdown(text: string): { references: Reference[]; errors: ScanError[] } {
 	const references: Reference[] = [];
 	const errors: ScanError[] = [];
@@ -129,8 +200,7 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 		const line = lines[i]!;
 
 		if (fence) {
-			const close = new RegExp(`^\\s*${fence.char === '`' ? '`' : '~'}{${fence.len},}\\s*$`);
-			if (close.test(line)) {
+			if (fenceCloses(line, fence)) {
 				if (pending) {
 					const { bodyStart, ...rest } = pending;
 					references.push({ ...rest, body: lines.slice(bodyStart, i).join('\n'), closeLine: i + 1 });
@@ -143,7 +213,9 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 
 		const open = FENCE_OPEN.exec(line);
 		if (open) {
-			const [, indent, run, restRaw] = open as unknown as [string, string, string, string];
+			const indent = open[1]!;
+			const run = open[2]!;
+			const restRaw = open[3]!;
 			fence = { char: run[0]!, len: run.length };
 			const info = restRaw.trim();
 			if (!info.includes('docref=')) continue;
@@ -180,7 +252,8 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 
 		const begin = CLAIM_BEGIN.exec(line);
 		if (begin) {
-			const [, indent, argsRaw] = begin as unknown as [string, string, string];
+			const indent = begin[1]!;
+			const argsRaw = begin[2]!;
 			const tokens = argsRaw.split(/\s+/).filter(Boolean);
 			const withEq = tokens.filter((t) => t.includes('='));
 			if (withEq.length === 0) {
@@ -236,8 +309,21 @@ export function scanMarkdown(text: string): { references: Reference[]; errors: S
 }
 
 /** Rewrite the ref token's value, keeping every other token in order. */
-function withRefValue(tokens: string[], anchorKey: string, value: string): string[] {
+export function withRefValue(tokens: string[], anchorKey: string, value: string): string[] {
 	return tokens.map((t) => (t.startsWith(`${anchorKey}=`) ? `${anchorKey}=${value}` : t));
+}
+
+/** The one place a claim begin line is emitted (approveClaims, claimBlockText,
+ * and ops.remove all call it), so the marker's open syntax cannot drift. */
+export function renderClaimBegin(indent: string, tokens: string[]): string {
+	return `${indent}<!-- docref: begin ${tokens.join(' ')} -->`;
+}
+
+/** The `src=` value for a claim: each ref with its sha when approved, else bare,
+ * comma-joined. Used where the sha is CONDITIONAL (claimBlockText, ops.remove);
+ * approveClaims emits shas unconditionally and does not use this. */
+export function buildSrcValue(sources: { ref: string; sha?: string }[]): string {
+	return sources.map((s) => (s.sha ? `${s.ref}:${s.sha}` : s.ref)).join(',');
 }
 
 export type SnippetEdit = { carrier: Snippet; body: string; sha: string };
@@ -250,7 +336,8 @@ export type SnippetEdit = { carrier: Snippet; body: string; sha: string };
 function fenceLengthFor(body: string, fenceChar: string, atLeast = 3): number {
 	let maxRun = 0;
 	for (const l of body.split('\n')) {
-		const run = new RegExp(`^\\s*(${fenceChar === '`' ? '`' : '~'}{3,})`).exec(l);
+		// fenceChar is a single backtick or tilde — neither is regex-special
+		const run = new RegExp(`^\\s*(${fenceChar}{3,})`).exec(l);
 		if (run) maxRun = Math.max(maxRun, run[1]!.length);
 	}
 	return Math.max(atLeast, maxRun + 1, 3);
@@ -277,18 +364,12 @@ export type ClaimEdit = { carrier: Claim; shas: string[] };
 export function approveClaims(text: string, edits: ClaimEdit[]): string {
 	const lines = text.split('\n');
 	for (const { carrier: c, shas } of edits) {
+		// approval pins every source: shas are unconditional here, not buildSrcValue
 		const value = c.refs.map((r, k) => `${r}:${shas[k]}`).join(',');
 		const tokens = withRefValue(c.tokens, 'src', value);
-		lines[c.openLine - 1] = `${c.indent}<!-- docref: begin ${tokens.join(' ')} -->`;
+		lines[c.openLine - 1] = renderClaimBegin(c.indent, tokens);
 	}
 	return lines.join('\n');
-}
-
-export function assertNoErrors(errors: ScanError[], doc: string): void {
-	if (errors.length > 0) {
-		const e = errors[0]!;
-		throw new DocrefError(e.code, `${doc}:${e.line} ${e.message}`);
-	}
 }
 
 /**
@@ -303,6 +384,6 @@ export function snippetFenceText(ref: string, sha: string, language: string, bod
 
 /** Paste-ready claim block, one source per ref, shas riding along. */
 export function claimBlockText(sources: { ref: string; sha?: string }[]): string {
-	const value = sources.map((s) => (s.sha ? `${s.ref}:${s.sha}` : s.ref)).join(',');
-	return `<!-- docref: begin src=${value} -->\n\n<!-- docref: end -->\n`;
+	const begin = renderClaimBegin('', [`src=${buildSrcValue(sources)}`]);
+	return `${begin}\n\n${CLAIM_END_LINE}\n`;
 }

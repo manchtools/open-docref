@@ -1,7 +1,8 @@
 export { DocrefError } from './errors';
-export { contentHash, shortHash, stripWhitespace, hashesMatch } from './hash';
-export { parseRef, type Ref, type Fragment } from './ref';
-export { scanRegions, extractRegion, type Region, type RegionError } from './regions';
+export { dedent } from './dedent';
+export { contentHash, shortHash, stripWhitespace, hashesMatch, SHORT_HASH_LEN } from './hash';
+export { parseRef, isKebabName, KEBAB_NAME, type Ref, type Fragment } from './ref';
+export { scanRegions, type Region, type RegionError } from './regions';
 export {
 	scanMarkdown,
 	rewriteSnippets,
@@ -15,7 +16,7 @@ export {
 	type ScanError
 } from './markdown';
 export { listDeclarations, findSymbol, configureWasm, type Decl, type WasmConfig } from './symbols';
-export { languageForFile, type LanguageId, type LanguageInfo } from './languages';
+export { languageForFile, fenceLanguageForRef, type LanguageId, type LanguageInfo } from './languages';
 export { workingTreeSource, resolveAnchor, type FileSource, type Anchor } from './resolve';
 export { loadProject, writeLock, findRoot, type Project, type RepoConfig } from './config';
 export { ensureCommit, branchTip, gitRevSource } from './gitcache';
@@ -31,6 +32,7 @@ export {
 	remove,
 	resolveReference,
 	exitCode,
+	EXIT,
 	anchorFiles,
 	suggest,
 	type SuggestEntry,

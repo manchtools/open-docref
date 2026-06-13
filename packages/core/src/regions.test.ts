@@ -1,6 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { scanRegions, extractRegion } from './regions';
+import { scanRegions } from './regions';
+import { resolveAnchor, type FileSource } from './resolve';
+import { parseRef } from './ref';
 import { DocrefError } from './errors';
+
+// Region materialization is exercised through the LIVE path (resolveAnchor over
+// an in-memory FileSource), so the test pins the same dedented output the engine
+// actually produces — not a parallel extractor that drifted from it.
+function memSource(content: string): FileSource {
+	return { read: () => content, describe: () => 'mem' };
+}
+const regionContent = (src: string, name: string): Promise<string> =>
+	resolveAnchor(memSource(src), parseRef(`mem.ts#@${name}`)).then((a) => a.content);
+const regionCode = async (src: string, name: string): Promise<string> => {
+	try {
+		await regionContent(src, name);
+		return 'no-error';
+	} catch (e) {
+		return (e as DocrefError).code;
+	}
+};
 
 // Contract (format.md section 2): regions are delimited by
 // "docref: begin <name>" / "docref: end <name>" appearing anywhere in a
@@ -36,7 +55,7 @@ describe('scanRegions', () => {
 		expect(regions.get('slash-style')).toEqual({ beginLine: 1, endLine: 3 });
 	});
 
-	it('allows nested and overlapping regions, both extract correctly', () => {
+	it('allows nested and overlapping regions, both resolve correctly', async () => {
 		const src = [
 			'// docref: begin outer',
 			'one',
@@ -48,10 +67,10 @@ describe('scanRegions', () => {
 		].join('\n');
 		const { regions, errors } = scanRegions(src);
 		expect(errors).toEqual([]);
-		expect(extractRegion(src, 'inner')).toBe('two');
+		expect(await regionContent(src, 'inner')).toBe('two');
 		// markers of the inner region are part of the outer region's text
-		expect(extractRegion(src, 'outer')).toContain('two');
-		expect(extractRegion(src, 'outer')).toContain('three');
+		expect(await regionContent(src, 'outer')).toContain('two');
+		expect(await regionContent(src, 'outer')).toContain('three');
 		expect(regions.size).toBe(2);
 	});
 
@@ -91,7 +110,7 @@ describe('scanRegions', () => {
 	});
 });
 
-describe('extractRegion', () => {
+describe('region materialization (via resolveAnchor)', () => {
 	const src = [
 		'before',
 		'\t// docref: begin core',
@@ -102,21 +121,18 @@ describe('extractRegion', () => {
 		'after'
 	].join('\n');
 
-	it('returns the lines between the markers, markers excluded', () => {
-		expect(extractRegion(src, 'core')).toBe('\tconst a = 1;\n\n\tconst b = 2;');
+	it('returns the lines between the markers, markers excluded and dedented', () => {
+		// the live path dedents (resolve.ts), so an indented region comes out flush
+		// left with internal blanks preserved — the contract a doc actually sees
+		return expect(regionContent(src, 'core')).resolves.toBe('const a = 1;\n\nconst b = 2;');
 	});
 
-	it('throws region-not-found for an unknown name', () => {
-		expect(() => extractRegion(src, 'nope')).toThrow(DocrefError);
-		try {
-			extractRegion(src, 'nope');
-		} catch (e) {
-			expect((e as DocrefError).code).toBe('region-not-found');
-		}
+	it('fails closed with region-not-found for an unknown name', async () => {
+		expect(await regionCode(src, 'nope')).toBe('region-not-found');
 	});
 
-	it('fails closed when the file has any marker error', () => {
+	it('fails closed when the file has any marker error', async () => {
 		const broken = '// docref: begin a\nx\n// docref: end a\n// docref: begin loose';
-		expect(() => extractRegion(broken, 'a')).toThrow(DocrefError);
+		expect(await regionCode(broken, 'a')).toBe('region-error');
 	});
 });
