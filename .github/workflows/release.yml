@@ -24,7 +24,8 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run check
-      - run: bun test
+      # vitest (the dev-loop runner), not Bun's native `bun test` — see ci.yml.
+      - run: bun run test
       - run: bun run build
       - run: node packages/cli/dist/docref.js check
 

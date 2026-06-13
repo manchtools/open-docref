@@ -29,7 +29,11 @@ jobs:
         run: bun run check
 
       - name: Test (the contract suite)
-        run: bun test
+        # `bun run test` dispatches to the vitest script (package.json), the
+        # runner contributors use. `bun test` is Bun's own runner: it ignores
+        # vitest.config.ts and shares module state across files, so the suites
+        # disagree. Keep CI on the same engine as the dev loop.
+        run: bun run test
 
       - name: Build CLI and extension
         run: bun run build
