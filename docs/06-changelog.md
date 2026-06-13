@@ -1,3 +1,8 @@
+---
+title: Changelog
+description: Notable changes to docref per version. Mirrors the repository CHANGELOG.md.
+---
+
 # Changelog
 
 All notable changes to this project are recorded here.
@@ -5,13 +10,13 @@ All notable changes to this project are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims at [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Before 1.0 the on-disk format may still change; any such change is called out
-under its own heading and noted in the relevant document under [docs/](docs/).
+under its own heading and noted in the [relevant document](/format).
 
 ## [Unreleased]
 
 _Nothing yet — changes accumulate here for the next release._
 
-## [0.1.0] - 2026-06-13
+## v0.1.0 — 2026-06-13
 
 docref's first release: the format, the CLI (single binary + container image),
 and the VS Code extension. Same-repo and cross-repo resolution; symbols across
@@ -26,11 +31,12 @@ editor; and an agent-ready JSON contract.
   leading-dash positional as an option wherever it appears: a rev or ref of
   the form `--upload-pack=<cmd>` turned a cross-repo fetch into arbitrary
   command execution, and a `transport::address` url (`ext::`, `fd::`) ran a
-  remote helper. A repository that accepts pull requests and runs `docref
-  check`/`docref update` in CI was exposed. Revisions must now be hex object
-  ids, refs and urls are constrained to safe shapes, every git invocation runs
-  with `GIT_ALLOW_PROTOCOL` restricted to `file:git:http:https:ssh`, and
-  fetches pass `--end-of-options` before any user-influenced argument.
+  remote helper. A repository that accepts pull requests and runs
+  `docref check`/`docref update` in CI was exposed. Revisions must now be hex
+  object ids, refs and urls are constrained to safe shapes, every git
+  invocation runs with `GIT_ALLOW_PROTOCOL` restricted to
+  `file:git:http:https:ssh`, and fetches pass `--end-of-options` before any
+  user-influenced argument.
 
 ### Fixed
 
@@ -119,8 +125,8 @@ editor; and an agent-ready JSON contract.
   references exceeds one second on the binary.
 
 Foundation (plan milestones 1 through 5 — the format and the first cut, with
-the spec in [docs/02-format/index.md](docs/02-format/index.md) and the tool in
-[docs/03-tooling/index.md](docs/03-tooling/index.md)):
+the spec in the [Format specification](/format) and the tool in
+[Tooling & CLI](/tooling)):
 
 - **Format.** Same-repo and cross-repo references; symbol, region, and
   whole-file anchors; whitespace-insensitive content hashing; materialized

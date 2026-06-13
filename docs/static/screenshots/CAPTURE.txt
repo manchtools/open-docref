@@ -1,0 +1,33 @@
+Extension screenshots — capture checklist
+==========================================
+
+This folder holds the VS Code extension screenshots referenced by the docs site.
+It is a .txt (not .md) so the open-docs content scanner never serves it as a page.
+
+open-docs fails boot on a missing screenshot file, so the {% screenshot %} blocks
+on docs/03-tooling/03-vscode-extension.md are added ONLY once the matching PNGs
+exist here. Capture these (a 2x / retina PNG is ideal), drop them in, and add the
+tag for each on the extension page:
+
+  extension-codelens.png          The "Referenced by N docs" CodeLens above an
+                                  anchored symbol in a code file.
+  extension-diagnostic-quickfix.png
+                                  A stale/broken reference squiggle in a markdown
+                                  doc with the quick-fix menu open (Open referenced
+                                  code / Show drift diff / Approve).
+  extension-references-sidebar.png
+                                  The References view with the "Needs attention"
+                                  group expanded.
+  extension-autocomplete.png      Reference autocomplete: typing a docref= value,
+                                  the symbol list with the :sha attached.
+  extension-claim-scaffold.png    The claim-block scaffold inserted, cursor on src=.
+  extension-drift-diff.png        The approved-vs-current drift diff tab.
+  extension-statusbar.png         The status-bar counter.
+
+Optional: a matching dark-theme PNG per shot, named <name>-dark.png, passed as the
+`dark=` attribute.
+
+The {% screenshot %} tag (open-docs):
+  {% screenshot src="extension-codelens.png" alt="Referenced-by CodeLens"
+     caption="…" dark="extension-codelens-dark.png" variant="frame" /%}
+src is resolved under this static/screenshots/ directory.

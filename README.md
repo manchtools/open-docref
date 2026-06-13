@@ -157,9 +157,15 @@ a region marker.
 Building from source and running the extension in a development host are
 covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- [docs/format.md](docs/format.md): the normative format specification
-- [docs/tooling.md](docs/tooling.md): CLI surface, CI patterns, VSCode
-  extension, agent contract, implementation plan
+The full documentation is published as a site under [`docs/`](docs/) — a
+content tree served by [open-docs](https://github.com/manchtools/open-docs).
+Spin it up with `cd docs && docker compose up` (see
+[docs/docker-compose.yml](docs/docker-compose.yml)). The source pages:
+
+- [docs/02-format/](docs/02-format/index.md): the normative format specification
+- [docs/03-tooling/](docs/03-tooling/index.md): CLI surface, CI patterns, the
+  VS Code extension, and the agent contract
+- [docs/04-internals/](docs/04-internals/index.md): how docref works inside
 - [CONTRIBUTING.md](CONTRIBUTING.md): layout, the build/test loop, and the
   bar for changes
 - [CHANGELOG.md](CHANGELOG.md): notable changes per version

@@ -1,0 +1,46 @@
+# Spin up the open-docref documentation site with open-docs.
+#
+#   cd docs && docker compose up          # http://localhost:3000 (no TLS)
+#
+# For TLS, attach your Traefik instance to the `docref-docs` network below
+# (see the networks block) and point a DNS record at it. Traefik terminates
+# TLS; this container stays plain HTTP on its own network.
+services:
+  docs:
+    image: ghcr.io/manchtools/open-docs:latest
+    restart: unless-stopped
+    # Local-only quick look (drop when fronting with Traefik):
+    ports:
+      - "3000:3000"
+    volumes:
+      # docs/ is the content tree; non-markdown (this file, static/) is ignored.
+      - ./:/content:ro
+      # screenshots and other assets; {% screenshot %} resolves under static/screenshots/.
+      - ./static:/static:ro
+    environment:
+      PUBLIC_BRAND_NAME: open-docref
+      PUBLIC_SITE_TITLE: open-docref documentation
+      PUBLIC_SITE_DESCRIPTION: Keep documentation anchored to the code it describes, so drift is never silent.
+      PUBLIC_REPO_URL: https://github.com/manchtools/open-docref
+      # Set the full public URL to enable canonical / Open Graph / absolute links:
+      # PUBLIC_SITE_URL: https://docs.example.com
+    networks:
+      - docref-docs
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=docref-docs
+      # --- replace the host and certresolver with your own ---
+      - traefik.http.routers.docref-docs.rule=Host(`docs.example.com`)
+      - traefik.http.routers.docref-docs.entrypoints=websecure
+      - traefik.http.routers.docref-docs.tls=true
+      - traefik.http.routers.docref-docs.tls.certresolver=letsencrypt
+      - traefik.http.services.docref-docs.loadbalancer.server.port=3000
+
+networks:
+  docref-docs:
+    # Its own network. Attach your Traefik container to it so it can route TLS:
+    #   docker network connect docref-docs <your-traefik-container>
+    # Or, if Traefik already owns a shared proxy network, replace this block with:
+    #   external: true
+    #   name: proxy
+    name: docref-docs

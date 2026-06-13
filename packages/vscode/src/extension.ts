@@ -39,6 +39,9 @@ import {
 	isValidRegionName,
 	normalizeSelectionLines,
 	symbolFragmentForSelection,
+	claimScaffoldSnippet,
+	claimScaffoldTriggerLength,
+	noReferenceablesMessage,
 	diagnosticsFromReport,
 	quickFixesForState,
 	buildReferencesTree,
@@ -507,15 +510,44 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	// The claim-block scaffold (begin/end markers, cursor on src=, then suggest
+	// re-fires so the reference autocomplete finishes the ref). `range` covers
+	// the typed `docref`/`docref#` shorthand so accepting REPLACES it instead of
+	// leaving it behind; `filterText` must equal that text or VS Code filters the
+	// item out.
+	const claimScaffold = (range?: vscode.Range, filterText = 'docref'): vscode.CompletionItem => {
+		const item = new vscode.CompletionItem('docref: claim block', vscode.CompletionItemKind.Snippet);
+		item.insertText = new vscode.SnippetString(claimScaffoldSnippet());
+		if (range) item.range = range;
+		item.filterText = filterText;
+		item.sortText = '0docref';
+		item.detail = 'docref claim — begin/end markers, cursor at src';
+		item.documentation =
+			'Insert a docref claim block; the cursor lands on src= so the reference autocomplete can complete it, then on the prose.';
+		item.command = { command: 'editor.action.triggerSuggest', title: 'Complete the reference' };
+		return item;
+	};
+
 	// Autocomplete a docref reference as it is typed: file path, then the
 	// symbol or @region inside it, with the :sha computed and attached inline.
 	const completionProvider: vscode.CompletionItemProvider = {
-		async provideCompletionItems(doc, position) {
+		async provideCompletionItems(doc, position, _token, context) {
+			const line = doc.lineAt(position.line).text;
+			const ctx = refCompletionContext(line, position.character);
+			if (!ctx) {
+				// Not in a ref value. Markdown does not auto-suggest on plain typing,
+				// so offer the scaffold only when the user typed the `docref` shorthand
+				// or invoked suggest explicitly (Ctrl+Space) — never on a bare `#`.
+				const before = line.slice(0, position.character);
+				const trigLen = claimScaffoldTriggerLength(before);
+				if (trigLen === 0 && context.triggerKind !== vscode.CompletionTriggerKind.Invoke) return;
+				const range = new vscode.Range(position.line, position.character - trigLen, position.line, position.character);
+				return [claimScaffold(range, trigLen ? before.slice(before.length - trigLen) : 'docref')];
+			}
+			if (ctx.alias) return; // cross-repo file/symbol listing is not offered
 			const p = project();
 			const root = workspaceRoot();
 			if (!p || !root) return;
-			const ctx = refCompletionContext(doc.lineAt(position.line).text, position.character);
-			if (!ctx || ctx.alias) return; // cross-repo file/symbol listing is not offered
 			const word =
 				ctx.phase === 'path' ? ctx.partial.slice(ctx.partial.lastIndexOf('/') + 1) : ctx.partial;
 			const range = new vscode.Range(
@@ -535,7 +567,20 @@ export function activate(context: vscode.ExtensionContext): void {
 				}
 				return pathCompletions(anchorFileList, ctx.partial, range);
 			}
-			return await fragmentCompletions(root, ctx.path, ctx.kind, range);
+			const items = await fragmentCompletions(root, ctx.path, ctx.kind, range);
+			if (items.length > 0) return items;
+			// The file has nothing to anchor: say so, instead of a silent "No
+			// suggestions" the user can't interpret.
+			const notice = new vscode.CompletionItem(
+				noReferenceablesMessage(ctx.path, ctx.kind, languageForFile(ctx.path) !== null),
+				vscode.CompletionItemKind.Issue
+			);
+			notice.insertText = ctx.partial; // accepting re-inserts what was typed: a no-op
+			notice.filterText = ctx.partial;
+			notice.range = range;
+			notice.sortText = ' ';
+			notice.detail = 'docref';
+			return [notice];
 		}
 	};
 
@@ -642,6 +687,18 @@ export function activate(context: vscode.ExtensionContext): void {
 			':'
 		),
 		vscode.commands.registerCommand('docref.createAnchor', createAnchor),
+		// Reliable entry point for the claim scaffold: markdown does not auto-suggest
+		// on plain typing, so a command (palette / editor context menu) always works,
+		// regardless of suggest settings. Drops the block in and re-fires suggest on src=.
+		vscode.commands.registerCommand('docref.insertClaimBlock', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) {
+				void vscode.window.showWarningMessage('docref: open a markdown document first.');
+				return;
+			}
+			await editor.insertSnippet(new vscode.SnippetString(claimScaffoldSnippet()));
+			await vscode.commands.executeCommand('editor.action.triggerSuggest');
+		}),
 		vscode.commands.registerCommand('docref.rescan', () => rescan()),
 		vscode.commands.registerCommand('docref.refreshSnippets', async () => {
 			const p = project();

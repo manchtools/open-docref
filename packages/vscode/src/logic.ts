@@ -73,6 +73,31 @@ export function markerLines(
 	return { begin: wrap('begin'), end: wrap('end') };
 }
 
+/**
+ * A docref claim block as a VS Code snippet for insertion into markdown: the
+ * begin/end comment markers with the first tab stop (`$1`) parked at an empty
+ * `src=` — so the reference autocomplete completes it — and the final cursor
+ * (`$0`) in the prose between them. Lets an author scaffold a hand-written
+ * claim without typing the markers by hand. The marker shape must stay exactly
+ * what the core scanner recognizes as a claim (pinned by a round-trip test).
+ */
+export function claimScaffoldSnippet(): string {
+	return '<!-- docref: begin src=$1 -->\n$0\n<!-- docref: end -->';
+}
+
+/**
+ * Markdown doesn't auto-suggest on plain typing, so the scaffold is summoned by
+ * typing the shorthand `docref` (and, since `#` is a completion trigger, often
+ * `docref#`). That trigger text must be REPLACED by the inserted block, not left
+ * behind. Given the text before the cursor, return how many trailing characters
+ * are the trigger token (to cover with the completion's replace range), or 0 if
+ * there is none — e.g. a bare `#` heading, where the scaffold should not appear.
+ */
+export function claimScaffoldTriggerLength(before: string): number {
+	const m = /docref[#:]?$/i.exec(before);
+	return m ? m[0].length : 0;
+}
+
 const REGION_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 export function isValidRegionName(name: string): boolean {
@@ -456,6 +481,26 @@ export function buildStageTree(staged: { ref: string; sha?: string }[]): Sidebar
 		ref: s.ref,
 		state: 'unknown'
 	}));
+}
+
+/**
+ * The message shown in the suggest list when a file the user is referencing has
+ * nothing to anchor — so an empty fragment phase reads as a clear "nothing here"
+ * instead of a silent "No suggestions". `kind` is the fragment phase (`region`
+ * after `#@`, else `any`); `symbolsSupported` says whether structural symbol
+ * resolution exists for the file type, so the hint can point at region markers
+ * when it does not.
+ */
+export function noReferenceablesMessage(
+	path: string,
+	kind: 'any' | 'region',
+	symbolsSupported: boolean
+): string {
+	const base = path.split('/').pop() || path;
+	if (kind === 'region') return `No region markers in ${base}`;
+	return symbolsSupported
+		? `No referenceable symbols or region markers in ${base}`
+		: `No region markers in ${base} — no symbol support for this file type, add a marker`;
 }
 
 export type RefCompletion =

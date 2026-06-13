@@ -54,4 +54,5 @@ Two things this means when you work here:
 Build the CLI first with `bun run build` (the bundle is at
 `packages/cli/dist/docref.js`). The development loop and the test bar are in
 [CONTRIBUTING.md](CONTRIBUTING.md); the format and tool are specified in
-[docs/format.md](docs/format.md) and [docs/tooling.md](docs/tooling.md).
+[docs/02-format/index.md](docs/02-format/index.md) and
+[docs/03-tooling/index.md](docs/03-tooling/index.md).

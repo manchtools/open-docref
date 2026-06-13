@@ -26,6 +26,7 @@ import {
 	type Report,
 	type ReportEntry
 } from '@open-docref/core';
+import { installExtension } from './installext';
 
 // Single source of truth for the version, pinned to package.json by a test
 // (main.test.ts) so a release bump cannot desync them. Read as a constant so
@@ -48,6 +49,11 @@ commands:
   snippet <ref>               print a paste-ready materialized snippet
   remove <ref>                delete a reference everywhere, marker included
   anchors                     region markers in the code, unused ones flagged
+  install-extension           install the VS Code extension into your editors
+         --all                every detected editor, no prompt
+         --editor <list>      a comma-separated set of editor CLIs (e.g. code,cursor)
+  self-update                 update the binary AND refresh the extension in editors that have it
+         --skip-extension     update only the binary (compiled binary only)
 
 options:
   --json                      machine-readable output`;
@@ -248,6 +254,19 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 						.join('\n')
 				};
 			}
+			case 'install-extension': {
+				// editor bootstrap, not a docref-project command: needs no root
+				const all = popFlag(rest, '--all');
+				const editorList = popValue(rest, '--editor');
+				return await installExtension({ all, ...(editorList ? { editorList } : {}) });
+			}
+			case 'self-update':
+				// the compiled binary intercepts this before run(); reaching here
+				// means a node/source build, which updates through its package manager
+				return {
+					code: 2,
+					out: 'self-update replaces the compiled binary; a node/source install updates through its package manager instead.'
+				};
 			default:
 				return usage(`unknown command "${cmd ?? ''}"`);
 		}

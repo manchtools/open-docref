@@ -56,6 +56,8 @@ configureWasm({ runtimeWasm, grammar: (id) => GRAMMARS[id] ?? id });
 
 const argv = process.argv.slice(2);
 const result =
-	argv[0] === 'self-update' ? await selfUpdate(VERSION) : await run(argv, process.cwd());
+	argv[0] === 'self-update'
+		? await selfUpdate(VERSION, { skipExtension: argv.includes('--skip-extension') })
+		: await run(argv, process.cwd());
 if (result.out) console.log(result.out);
 process.exit(result.code);

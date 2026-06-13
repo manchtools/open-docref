@@ -41,6 +41,11 @@
 				"title": "Docref: Create Anchor from Selection"
 			},
 			{
+				"command": "docref.insertClaimBlock",
+				"title": "Docref: Insert Claim Block",
+				"icon": "$(note)"
+			},
+			{
 				"command": "docref.rescan",
 				"title": "Docref: Rescan",
 				"icon": "$(refresh)"
@@ -116,6 +121,11 @@
 				{
 					"command": "docref.createAnchor",
 					"when": "editorHasSelection",
+					"group": "docref"
+				},
+				{
+					"command": "docref.insertClaimBlock",
+					"when": "editorLangId == markdown",
 					"group": "docref"
 				},
 				{

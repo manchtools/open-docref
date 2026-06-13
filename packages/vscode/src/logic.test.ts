@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { scanRegions, type Decl, type Report, type RefIndex } from '@open-docref/core';
+import { scanRegions, scanMarkdown, type Decl, type Report, type RefIndex } from '@open-docref/core';
 import {
 	commentLeaderFor,
+	claimScaffoldSnippet,
+	claimScaffoldTriggerLength,
+	noReferenceablesMessage,
 	markerLines,
 	suggestRegionName,
 	isValidRegionName,
@@ -70,6 +73,62 @@ describe('markerLines', () => {
 			expect(errors).toEqual([]);
 			expect(regions.has('pinned')).toBe(true);
 		}
+	});
+});
+
+describe('claimScaffoldSnippet', () => {
+	it('parks the first tab stop at src= and the final cursor in the prose', () => {
+		const s = claimScaffoldSnippet();
+		// $1 is the reference autocomplete hand-off; it must sit right after src=
+		expect(s).toContain('src=$1');
+		expect(s).toContain('$0'); // prose body
+		expect(s.indexOf('$1')).toBeLessThan(s.indexOf('$0')); // src filled before prose
+	});
+
+	it('measures the trigger token to replace, so "docref#" is not left behind', () => {
+		// the shorthand the user typed must be covered by the completion's range
+		expect(claimScaffoldTriggerLength('docref')).toBe(6);
+		expect(claimScaffoldTriggerLength('docref#')).toBe(7);
+		expect(claimScaffoldTriggerLength('docref:')).toBe(7);
+		expect(claimScaffoldTriggerLength('intro: docref#')).toBe(7); // only the trailing token
+		// not the docref shorthand: a bare heading hash or unrelated text
+		expect(claimScaffoldTriggerLength('# Heading')).toBe(0);
+		expect(claimScaffoldTriggerLength('see the ')).toBe(0);
+	});
+
+	it('the marker skeleton is exactly what the core scanner recognizes as a claim', () => {
+		// fill the tab stops with a real ref + prose and round-trip through core,
+		// so a drift in the marker shape fails here rather than in the editor
+		const filled = claimScaffoldSnippet()
+			.replace('$1', 'src/a.ts#f:abcd1234')
+			.replace('$0', 'the prose');
+		const { references, errors } = scanMarkdown(filled);
+		expect(errors).toEqual([]);
+		expect(references).toHaveLength(1);
+		const ref = references[0]!;
+		expect(ref.kind).toBe('claim');
+		if (ref.kind === 'claim') expect(ref.refs).toContain('src/a.ts#f');
+	});
+});
+
+describe('noReferenceablesMessage', () => {
+	it('names the file and what is missing for a symbol+region (#) phase', () => {
+		expect(noReferenceablesMessage('src/index.ts', 'any', true)).toBe(
+			'No referenceable symbols or region markers in index.ts'
+		);
+	});
+
+	it('points at region markers when the file type has no symbol support', () => {
+		const msg = noReferenceablesMessage('data/schema.json', 'any', false);
+		expect(msg).toContain('schema.json');
+		expect(msg).toContain('no symbol support');
+		expect(msg).toContain('marker');
+	});
+
+	it('talks only about regions for an @region (#@) phase', () => {
+		expect(noReferenceablesMessage('src/index.ts', 'region', true)).toBe(
+			'No region markers in index.ts'
+		);
 	});
 });
 

@@ -5,8 +5,8 @@
 // pass a token via GITHUB_TOKEN / DOCREF_GITHUB_TOKEN for a private repo.
 import { chmodSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-
-const REPO = 'manchtools/open-docref';
+import { downloadAsset, latestRelease } from './github';
+import { installExtension } from './installext';
 
 // Must match exactly the asset names the release workflow uploads.
 const ASSETS: Record<string, string> = {
@@ -25,22 +25,10 @@ export function assetName(platform: string, arch: string): string {
 	return name;
 }
 
-function authHeaders(): Record<string, string> {
-	const token = process.env.DOCREF_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
-	const h: Record<string, string> = {
-		'user-agent': 'docref-self-update',
-		accept: 'application/vnd.github+json'
-	};
-	if (token) h.authorization = `Bearer ${token}`;
-	return h;
-}
-
-type Release = {
-	tag_name?: string;
-	assets?: { name: string; url: string }[];
-};
-
-export async function selfUpdate(currentVersion: string): Promise<{ code: number; out: string }> {
+export async function selfUpdate(
+	currentVersion: string,
+	opts: { skipExtension?: boolean } = {}
+): Promise<{ code: number; out: string }> {
 	const target = process.execPath; // the running binary
 	let name: string;
 	try {
@@ -49,16 +37,9 @@ export async function selfUpdate(currentVersion: string): Promise<{ code: number
 		return { code: 2, out: (e as Error).message };
 	}
 
-	let release: Release;
+	let release;
 	try {
-		const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-			headers: authHeaders()
-		});
-		if (!res.ok) {
-			const hint = res.status === 404 || res.status === 401 ? ' — private repo? set GITHUB_TOKEN' : '';
-			return { code: 2, out: `could not reach ${REPO} releases (HTTP ${res.status})${hint}` };
-		}
-		release = (await res.json()) as Release;
+		release = await latestRelease('docref-self-update');
 	} catch (e) {
 		return { code: 2, out: `self-update failed: ${(e as Error).message}` };
 	}
@@ -72,15 +53,9 @@ export async function selfUpdate(currentVersion: string): Promise<{ code: number
 		return { code: 2, out: `release ${tag || '(latest)'} has no asset ${name}` };
 	}
 
-	let bytes: ArrayBuffer;
+	let bytes: Buffer;
 	try {
-		// the API asset url + octet-stream accept yields the binary (works for
-		// private repos with a token; GitHub redirects, which fetch follows)
-		const res = await fetch(asset.url, {
-			headers: { ...authHeaders(), accept: 'application/octet-stream' }
-		});
-		if (!res.ok) return { code: 2, out: `download failed (HTTP ${res.status})` };
-		bytes = await res.arrayBuffer();
+		bytes = await downloadAsset(asset, 'docref-self-update');
 	} catch (e) {
 		return { code: 2, out: `download failed: ${(e as Error).message}` };
 	}
@@ -90,7 +65,7 @@ export async function selfUpdate(currentVersion: string): Promise<{ code: number
 	// Windows the file is locked, so we report that instead of corrupting it.
 	const tmp = join(dirname(target), `.docref-update-${process.pid}`);
 	try {
-		writeFileSync(tmp, Buffer.from(bytes));
+		writeFileSync(tmp, bytes);
 		chmodSync(tmp, 0o755);
 		renameSync(tmp, target);
 	} catch (e) {
@@ -104,5 +79,12 @@ export async function selfUpdate(currentVersion: string): Promise<{ code: number
 			out: `could not replace ${target}: ${(e as Error).message}. Re-run with sufficient permissions, or download the new binary manually.`
 		};
 	}
-	return { code: 0, out: `updated ${currentVersion ? `${currentVersion} -> ` : ''}${tag} (${name})` };
+	const updated = `updated ${currentVersion ? `${currentVersion} -> ` : ''}${tag} (${name})`;
+
+	// Keep the editor extension in lockstep with the binary: refresh it in every
+	// editor that already has it. Best-effort and in-place — never installs it
+	// somewhere new. Opt out with --skip-extension.
+	if (opts.skipExtension) return { code: 0, out: updated };
+	const ext = await installExtension({ onlyInstalled: true });
+	return { code: ext.code, out: `${updated}\n${ext.out}` };
 }

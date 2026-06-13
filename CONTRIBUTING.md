@@ -5,10 +5,10 @@ Thanks for helping keep documentation anchored to code.
 This is a small codebase with a deliberate design. Two documents are
 normative and worth reading before you change behaviour:
 
-- [docs/format.md](docs/format.md) — the on-disk format: how code is
+- [docs/02-format/index.md](docs/02-format/index.md) — the on-disk format: how code is
   anchored, how markdown carries references, how content is hashed, and what
   states a reference can be in.
-- [docs/tooling.md](docs/tooling.md) — the tool over that format: the CLI, the
+- [docs/03-tooling/index.md](docs/03-tooling/index.md) — the tool over that format: the CLI, the
   CI patterns, the VSCode extension, and the agent contract.
 
 The design principles in the [README](README.md#design-principles) — plain
@@ -69,8 +69,8 @@ the implementation; never quiet it with a skip to make the suite green.
 
 The format is pre-1.0 but it is still a contract: documents and source files
 in the wild carry these references and hashes. If a change alters what is
-written to disk or how a reference resolves, update [docs/format.md](docs/format.md)
-or [docs/tooling.md](docs/tooling.md) in the same change and add an entry to
+written to disk or how a reference resolves, update [docs/02-format/index.md](docs/02-format/index.md)
+or [docs/03-tooling/index.md](docs/03-tooling/index.md) in the same change and add an entry to
 [CHANGELOG.md](CHANGELOG.md) under `Unreleased`, calling out the
 compatibility impact explicitly.
 
