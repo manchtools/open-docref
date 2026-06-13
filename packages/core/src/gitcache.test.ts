@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { assertRev, assertRef, assertUrl } from './gitcache';
+import { mkdirSync } from 'node:fs';
+import { assertRev, assertRef, assertUrl, cacheDirFor, ensureCommit } from './gitcache';
 import { DocrefError } from './errors';
+import { tmp, git } from './testutil';
 
 // Contract: rev, ref, and url are read from committed config (docref.lock,
 // docref.toml) and handed to the system `git` as positional arguments. git
@@ -107,5 +109,47 @@ describe('assertUrl: a remote url safe to hand git', () => {
 		expect(() => assertUrl('')).toThrow(DocrefError);
 		expect(() => assertUrl('javascript:alert(1)')).toThrow(DocrefError);
 		expect(() => assertUrl('owner/repo')).toThrow(DocrefError); // no scheme, no user@host
+	});
+});
+
+describe('cacheDirFor: the cache key is injective per repository', () => {
+	it('gives distinct dirs to urls a punctuation-collapsing slug would merge', () => {
+		// the slug bug: `owner/repo` and `owner-repo` both collapse to
+		// `github.com-owner-repo`, so the second alias would read the first
+		// repo's bare clone. The key must distinguish genuinely different urls.
+		const a = cacheDirFor('https://github.com/owner/repo');
+		const b = cacheDirFor('https://github.com/owner-repo');
+		expect(a).not.toBe(b);
+		// and the same url is stable (a cache hit, not a fresh clone every time)
+		expect(cacheDirFor('https://github.com/owner/repo')).toBe(a);
+	});
+});
+
+describe('ensureCommit: refuses a cached dir whose origin is a different repo', () => {
+	it('fails closed on an origin mismatch (collision defense in depth)', () => {
+		const cache = tmp();
+		const prev = process.env.DOCREF_CACHE;
+		process.env.DOCREF_CACHE = cache;
+		try {
+			const url = 'https://example.com/owner/repo';
+			const dir = cacheDirFor(url);
+			// pre-create the bare repo with a DIFFERENT origin, simulating a key
+			// collision: ensureCommit must refuse, never read the wrong repo
+			mkdirSync(dir, { recursive: true });
+			git(dir, 'init', '--bare', '-q');
+			git(dir, 'remote', 'add', 'origin', '--', 'https://example.com/other/repo');
+			const rev = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4';
+			// the origin check must short-circuit BEFORE any network fetch
+			let code = 'no-error';
+			try {
+				ensureCommit(url, rev);
+			} catch (e) {
+				code = (e as DocrefError).code;
+			}
+			expect(code).toBe('cache-origin-mismatch');
+		} finally {
+			if (prev === undefined) delete process.env.DOCREF_CACHE;
+			else process.env.DOCREF_CACHE = prev;
+		}
 	});
 });

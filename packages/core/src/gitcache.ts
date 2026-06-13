@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { DocrefError } from './errors';
 import type { FileSource } from './resolve';
 
@@ -16,9 +17,19 @@ function cacheRoot(): string {
 	);
 }
 
-function cacheDirFor(url: string): string {
-	const slug = url.replace(/^[a-z+]+:\/\//i, '').replace(/[^A-Za-z0-9._-]+/g, '-');
-	return join(cacheRoot(), slug);
+export function cacheDirFor(url: string): string {
+	// Content-address by the EXACT url, so distinct repositories can never share
+	// a clone. The old punctuation-collapsing slug mapped `owner/repo` and
+	// `owner-repo` to one dir, letting one alias read another repo's content (and
+	// it was unbounded in length). A short sanitized hint is prepended purely for
+	// human debuggability; the sha256 digest is what makes the key injective.
+	const digest = createHash('sha256').update(url).digest('hex').slice(0, 32);
+	const hint = url
+		.replace(/^[a-z+]+:\/\//i, '')
+		.replace(/[^A-Za-z0-9._-]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 40);
+	return join(cacheRoot(), hint ? `${hint}-${digest}` : digest);
 }
 
 // Inputs read from committed config (docref.lock rev, docref.toml ref/url)
@@ -67,14 +78,17 @@ export function assertUrl(url: string): string {
 // with assertUrl, in case a future caller bypasses it.
 const GIT_ENV = { ...process.env, GIT_ALLOW_PROTOCOL: 'file:git:http:https:ssh' };
 
+// The one spawn configuration, shared by every git invocation so a change (a new
+// GIT_* env var, a stdio tweak) cannot apply to some call sites and not others.
+const GIT_SPAWN: { encoding: 'utf8'; stdio: ['ignore', 'pipe', 'pipe']; env: NodeJS.ProcessEnv } = {
+	encoding: 'utf8',
+	stdio: ['ignore', 'pipe', 'pipe'],
+	env: GIT_ENV
+};
+
 function git(args: string[], cwd: string): string {
 	try {
-		return execFileSync('git', args, {
-			cwd,
-			encoding: 'utf8',
-			stdio: ['ignore', 'pipe', 'pipe'],
-			env: GIT_ENV
-		});
+		return execFileSync('git', args, { cwd, ...GIT_SPAWN });
 	} catch (e) {
 		const err = e as { stderr?: string; message: string };
 		throw new DocrefError('git-failed', `git ${args.join(' ')}: ${err.stderr?.trim() || err.message}`);
@@ -88,6 +102,16 @@ function ensureRepo(url: string): string {
 		mkdirSync(dir, { recursive: true });
 		git(['init', '--bare', '-q'], dir);
 		git(['remote', 'add', 'origin', '--', url], dir);
+	} else {
+		// defense in depth against a cache-key collision: an existing clone's
+		// origin must be exactly this url, or we could fetch/read another repo
+		const origin = git(['remote', 'get-url', 'origin'], dir).trim();
+		if (origin !== url) {
+			throw new DocrefError(
+				'cache-origin-mismatch',
+				`cache dir ${dir} has origin ${origin}, expected ${url}`
+			);
+		}
 	}
 	return dir;
 }
@@ -110,9 +134,19 @@ export function ensureCommit(url: string, rev: string): string {
 		// --end-of-options stops git treating rev as an option (assertRev
 		// already forbids that; this is the second lock)
 		git(['fetch', '-q', '--depth', '1', 'origin', '--end-of-options', rev], dir);
-	} catch {
-		// some servers refuse fetch-by-sha; fall back to fetching branches
-		git(['fetch', '-q', 'origin'], dir);
+	} catch (first) {
+		// some servers refuse fetch-by-sha; fall back to fetching branch refs —
+		// still SHALLOW (--depth 1), so a transient auth/network failure is not
+		// silently escalated to a full-remote fetch. Surface the original
+		// targeted-fetch failure if the fallback fails too.
+		try {
+			git(['fetch', '-q', '--depth', '1', 'origin'], dir);
+		} catch (second) {
+			throw new DocrefError(
+				'rev-unavailable',
+				`cannot fetch commit ${rev} from ${url} (by-sha: ${(first as Error).message}; by-branch: ${(second as Error).message})`
+			);
+		}
 	}
 	if (!hasCommit(dir, rev)) {
 		throw new DocrefError('rev-unavailable', `commit ${rev} is not reachable from ${url}`);
@@ -136,13 +170,9 @@ export function gitRevSource(url: string, rev: string): FileSource {
 			dir ??= ensureCommit(url, rev);
 			try {
 				// the arg starts with the validated hex rev, so git can never
-				// read `<rev>:<path>` as an option
-				return execFileSync('git', ['show', `${rev}:${path}`], {
-					cwd: dir,
-					encoding: 'utf8',
-					stdio: ['ignore', 'pipe', 'pipe'],
-					env: GIT_ENV
-				});
+				// read `<rev>:<path>` as an option. A missing file at the rev is an
+				// expected miss (null), not an error — so this does not use git().
+				return execFileSync('git', ['show', `${rev}:${path}`], { cwd: dir, ...GIT_SPAWN });
 			} catch {
 				return null;
 			}
