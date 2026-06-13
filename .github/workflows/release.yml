@@ -54,7 +54,17 @@ jobs:
         working-directory: packages/vscode
         run: npx --yes @vscode/vsce@latest package --no-dependencies -o ../../out/
 
-      - name: Create the GitHub release and attach the binaries + .vsix
+      # Integrity manifest: `docref self-update` and install.sh verify a
+      # downloaded asset against this before running it (a missing/mismatched
+      # checksum fails closed). NOTE: checksums shipped in the same release prove
+      # integrity, NOT provenance — they do not stop an actor who can replace the
+      # release assets. FOLLOW-UP: sign SHA256SUMS out-of-band (cosign keyless /
+      # minisign) and verify the signature before trusting it.
+      - name: Generate SHA256SUMS
+        working-directory: out
+        run: sha256sum * > SHA256SUMS
+
+      - name: Create the GitHub release and attach the binaries + .vsix + SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

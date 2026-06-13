@@ -8,7 +8,8 @@
 // version is pinned to match web-tree-sitter so the language ABI matches the
 // runtime; bumping web-tree-sitter means bumping CLI_VERSION and rebuilding.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -24,7 +25,12 @@ const GRAMMARS = [
 		repo: 'https://github.com/Clement-Jean/tree-sitter-proto.git',
 		commit: '5c09ab434ea6a1dd03635ce58844b69a8d6bd90f',
 		fileTypes: ['proto'],
-		license: 'MIT'
+		license: 'MIT',
+		// sha256 of the committed wasm — the build is shipped to every user, so a
+		// regeneration that changes the bytes (new CLI/emscripten, moved commit)
+		// must be a deliberate, reviewed pin bump, never a silent swap. Update this
+		// only after diffing what changed.
+		sha256: '13a1e4bcef97398d44816440b89a99b0c94e31bff9c46ecc7965e66615d4bc35'
 	}
 ];
 
@@ -58,7 +64,19 @@ for (const g of GRAMMARS) {
 	const wasm = `tree-sitter-${g.name}.wasm`;
 	console.log(`# ${g.name}: building ${wasm} with tree-sitter-cli@${CLI_VERSION} (docker)`);
 	sh('npx', ['-y', `tree-sitter-cli@${CLI_VERSION}`, 'build', '--wasm', '-o', wasm, '.']);
-	copyFileSync(join(work, wasm), join(outDir, wasm));
+	const dest = join(outDir, wasm);
+	copyFileSync(join(work, wasm), dest);
 	rmSync(work, { recursive: true, force: true });
-	console.log(`# ${g.name}: wrote packages/core/grammars/${wasm}`);
+
+	// Provenance check: the bytes shipped to every user must match the reviewed
+	// pin. A mismatch means the build is no longer reproducible (toolchain or
+	// source moved) — fail loudly so it cannot land silently.
+	const digest = createHash('sha256').update(readFileSync(dest)).digest('hex');
+	if (g.sha256 && digest !== g.sha256) {
+		throw new Error(
+			`${g.name}: built wasm sha256 ${digest} does not match the pinned ${g.sha256}.\n` +
+				`If this change is intended, review the diff and update GRAMMARS[].sha256.`
+		);
+	}
+	console.log(`# ${g.name}: wrote packages/core/grammars/${wasm} (sha256 ${digest.slice(0, 12)})`);
 }
