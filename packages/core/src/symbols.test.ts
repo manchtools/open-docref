@@ -155,6 +155,17 @@ describe('go symbols', () => {
 		const m = await findSymbol(GO, 'src/a.go', 'VerifySignature');
 		expect(m.content).toContain('VerifySignature');
 	});
+
+	it('collects every name of a grouped declaration (plural name-field API)', async () => {
+		// `var a, b, c int` is one spec with three `name` fields; all must be
+		// collected. This pins the multi-name path (childrenForFieldName), so a
+		// regression to a single-child lookup would drop b and c.
+		const src = 'package api\n\nvar a, b, c int\n';
+		const paths = (await listDeclarations(src, 'src/m.go')).map((d) => d.path.join('.'));
+		expect(paths).toContain('a');
+		expect(paths).toContain('b');
+		expect(paths).toContain('c');
+	});
 });
 
 const PY = `import os
@@ -375,15 +386,108 @@ describe('symbol scope: locals inside function bodies are not symbols', () => {
 	});
 });
 
+// Contract (format.md section 1): the "top-level constant, never a local" rule
+// is language-agnostic. A const/val/property declared INSIDE a function body is
+// a local, not a symbol, in EVERY language with the generic collector — not just
+// TypeScript. Otherwise `#name` resolution silently differs by language and a
+// body-local can shadow a real top-level symbol.
+describe('symbol scope across languages: function-body locals are not symbols', () => {
+	it('rust: const/static inside a fn body are not symbols; top-level const is', async () => {
+		const RS = `pub fn outer() -> i32 {
+    const LOCAL: i32 = 2;
+    static SCRATCH: i32 = 3;
+    LOCAL + SCRATCH
+}
+
+pub const FACTOR: i32 = 99;
+`;
+		const paths = (await listDeclarations(RS, 'a.rs')).map((d) => d.path.join('.'));
+		expect(paths).toContain('outer');
+		expect(paths).toContain('FACTOR');
+		expect(paths).not.toContain('outer.LOCAL');
+		expect(paths).not.toContain('outer.SCRATCH');
+		expect(await code(() => findSymbol(RS, 'a.rs', 'outer.LOCAL'))).toBe('symbol-not-found');
+	});
+
+	it('scala: a val inside a def body is not a symbol; an object-level val is', async () => {
+		const SC = `object G {
+  def outer(n: Int): Int = {
+    val local = 2
+    local + n
+  }
+  val factor = 99
+}
+`;
+		const paths = (await listDeclarations(SC, 'A.scala')).map((d) => d.path.join('.'));
+		expect(paths).toContain('G.outer');
+		expect(paths).toContain('G.factor');
+		expect(paths).not.toContain('G.outer.local');
+	});
+
+	it('swift: a let inside a func body is not a symbol; a type-level property is', async () => {
+		const SW = `class C {
+  let value = 1
+  func outer() -> Int {
+    let local = 2
+    return local
+  }
+}
+`;
+		const paths = (await listDeclarations(SW, 'a.swift')).map((d) => d.path.join('.'));
+		expect(paths).toContain('C');
+		expect(paths).toContain('C.value');
+		expect(paths).toContain('C.outer');
+		expect(paths).not.toContain('C.outer.local');
+	});
+
+	it('kotlin: a val inside a fun body is not a symbol', async () => {
+		// (kotlin class-level `val` is not currently addressable at all — its name
+		// sits under variable_declaration, out of declName's reach — so this pins
+		// only that the function-body local does not leak; the class/fun do resolve)
+		const KT = `class C {
+  fun outer(): Int {
+    val local = 2
+    return local
+  }
+}
+`;
+		const paths = (await listDeclarations(KT, 'a.kt')).map((d) => d.path.join('.'));
+		expect(paths).toContain('C');
+		expect(paths).toContain('C.outer');
+		expect(paths).not.toContain('C.outer.local');
+	});
+
+	it('csharp: class members survive the scope guard (regression)', async () => {
+		const CS = `class C {
+  public int Count { get; set; }
+  public int Outer() {
+    int local = 2;
+    return local;
+  }
+}
+`;
+		const paths = (await listDeclarations(CS, 'A.cs')).map((d) => d.path.join('.'));
+		expect(paths).toContain('C.Count');
+		expect(paths).toContain('C.Outer');
+		expect(paths).not.toContain('C.Outer.local');
+	});
+});
+
 describe('configureWasm', () => {
 	// Bundled hosts (the VSCode extension) cannot resolve wasm files
 	// through node_modules at runtime; they must be able to point the
 	// resolver at shipped copies, and the override must actually be used.
 	it('honors explicit wasm locations, failing closed on wrong ones', async () => {
-		const { configureWasm } = await import('./symbols');
+		const { configureWasm, __resetWasmForTest } = await import('./symbols');
 		const { createRequire } = await import('node:module');
 		const { dirname, join } = await import('node:path');
 		const req = createRequire(import.meta.url);
+
+		// Drop any grammar another test file may have warmed. Without this the
+		// wrong path below is never consulted (the grammar is already cached),
+		// so the fail-closed assertion passes spuriously under runners that
+		// share module state across files (`bun test`).
+		__resetWasmForTest();
 
 		configureWasm({
 			runtimeWasm: req.resolve('web-tree-sitter/tree-sitter.wasm'),
@@ -410,10 +514,15 @@ describe('configureWasm', () => {
 		// A compiled binary embeds the grammars and gets back hashed, scattered
 		// paths, so it supplies `grammar(id)` instead of a `grammarsDir`. tsx is
 		// not loaded by any other test, so this exercises the resolver for real.
+		const { configureWasm, __resetWasmForTest } = await import('./symbols');
 		const { createRequire } = await import('node:module');
 		const { dirname, join } = await import('node:path');
 		const req = createRequire(import.meta.url);
 		const outDir = join(dirname(req.resolve('tree-sitter-wasms/package.json')), 'out');
+
+		// Ensure tsx is not pre-warmed, so the explicit resolver below is what
+		// actually loads it (order-independent under `bun test`).
+		__resetWasmForTest();
 
 		configureWasm({
 			runtimeWasm: req.resolve('web-tree-sitter/tree-sitter.wasm'),

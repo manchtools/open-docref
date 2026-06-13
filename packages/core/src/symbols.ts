@@ -39,6 +39,23 @@ export function configureWasm(config: WasmConfig | null): void {
 	wasmConfig = config;
 }
 
+/**
+ * Test-only: drop every module-level cache (runtime init, loaded grammars,
+ * parsers, and the decl memo) and the wasm override. Runners without per-file
+ * module isolation — notably `bun test` — share this module state across files,
+ * so a grammar warmed by one test leaks into the next. A test that asserts
+ * fail-closed resolution against a wrong wasm path would then find the grammar
+ * already cached and pass spuriously. Calling this first makes such a test
+ * order-independent. Not re-exported from the package barrel.
+ */
+export function __resetWasmForTest(): void {
+	inited = null;
+	languages.clear();
+	parsers.clear();
+	declCache.clear();
+	wasmConfig = null;
+}
+
 // Lazy on purpose: must never run at module load time, where a bundled
 // host would crash before it had the chance to call configureWasm().
 function packageResolve(spec: string): string {
@@ -113,14 +130,28 @@ function wrapped(node: Node, wrapperTypes: string[]): Node {
 	return node.parent && wrapperTypes.includes(node.parent.type) ? node.parent : node;
 }
 
+// All names bound by one field — e.g. `var a, b int` has two `name` children.
+// childrenForFieldName is a real web-tree-sitter API; childForFieldName would
+// silently keep only the first, dropping secondary names.
 function fieldChildren(node: Node, field: string): Node[] {
-	const viaApi = (
-		node as unknown as { childrenForFieldName?: (f: string) => (Node | null)[] }
-	).childrenForFieldName?.(field);
-	if (viaApi) return viaApi.filter((c): c is Node => c !== null);
-	const one = node.childForFieldName(field);
-	return one ? [one] : [];
+	return node.childrenForFieldName(field).filter((c): c is Node => c !== null);
 }
+
+// Breadth-first: the text of the first descendant (including the start node)
+// whose type is in `types`, or undefined. Shared by the Go receiver-type and
+// C/C++ declarator drills, which differ only in the matched type set.
+function firstDescendantText(start: Node, types: Set<string>): string | undefined {
+	const queue: Node[] = [start];
+	while (queue.length) {
+		const n = queue.shift()!;
+		if (types.has(n.type)) return n.text;
+		for (const c of n.namedChildren) if (c) queue.push(c);
+	}
+	return undefined;
+}
+
+const GO_RECEIVER_TYPES = new Set(['type_identifier']);
+const CPP_DECL_TYPES = new Set(['identifier', 'field_identifier', 'type_identifier']);
 
 const TS_NAMED = new Set([
 	'function_declaration',
@@ -180,13 +211,7 @@ function goReceiverType(method: Node): string | undefined {
 	if (!receiver) return undefined;
 	// the receiver type may be plain, a pointer, or generic; the first
 	// type_identifier inside is the type's name
-	const queue: Node[] = [receiver];
-	while (queue.length) {
-		const n = queue.shift()!;
-		if (n.type === 'type_identifier') return n.text;
-		for (const c of n.namedChildren) if (c) queue.push(c);
-	}
-	return undefined;
+	return firstDescendantText(receiver, GO_RECEIVER_TYPES);
 }
 
 function collectGo(source: string, node: Node, stack: string[], out: Decl[]): void {
@@ -247,17 +272,7 @@ function declName(node: Node): string | undefined {
 	if (direct) return direct;
 	// declarator-based (C/C++): drill to the identifier nearest the top
 	const dtor = node.childForFieldName('declarator');
-	if (dtor) {
-		const queue: Node[] = [dtor];
-		while (queue.length) {
-			const n = queue.shift()!;
-			if (n.type === 'identifier' || n.type === 'field_identifier' || n.type === 'type_identifier') {
-				return n.text;
-			}
-			for (const c of n.namedChildren) if (c) queue.push(c);
-		}
-		return undefined;
-	}
+	if (dtor) return firstDescendantText(dtor, CPP_DECL_TYPES);
 	// field-less grammars (e.g. kotlin): the name is the first identifier-like
 	// child of the declaration node
 	for (const c of node.namedChildren) {
@@ -266,65 +281,101 @@ function declName(node: Node): string | undefined {
 	return undefined;
 }
 
+type Collector = (source: string, node: Node, stack: string[], out: Decl[]) => void;
+
+const EMPTY_TYPES = new Set<string>();
+
+// `named` — node types that are declarations. `functionLike` — those whose
+// bodies hold locals (entering one sets inFn). `valueBindings` — the subset of
+// `named` that are value bindings (const/val/property): once inFn, they are
+// locals, not symbols, and are dropped — exactly walkTs's rule, generalized. A
+// nested function or class inside a function body is still collected; only value
+// bindings fall out. class/object/namespace do NOT set inFn, so their members
+// stay symbols.
 function namedCollector(
-	named: Set<string>,
-	wrappers: string[] = []
-): (s: string, n: Node, st: string[], o: Decl[]) => void {
-	const walk = (source: string, node: Node, stack: string[], out: Decl[]): void => {
-		if (named.has(node.type)) {
+	named: string[],
+	opts: { wrappers?: string[]; functionLike?: string[]; valueBindings?: string[] } = {}
+): Collector {
+	const names = new Set(named);
+	const wrappers = opts.wrappers ?? [];
+	const functionLike = opts.functionLike ? new Set(opts.functionLike) : EMPTY_TYPES;
+	const valueBindings = opts.valueBindings ? new Set(opts.valueBindings) : EMPTY_TYPES;
+	const walk = (source: string, node: Node, stack: string[], inFn: boolean, out: Decl[]): void => {
+		if (names.has(node.type)) {
+			if (inFn && valueBindings.has(node.type)) return; // a function-body local
 			const name = declName(node);
 			if (name) {
 				decl(source, wrapped(node, wrappers), [...stack, name], out);
-				for (const c of node.namedChildren) if (c) walk(source, c, [...stack, name], out);
+				const childInFn = inFn || functionLike.has(node.type);
+				for (const c of node.namedChildren) {
+					if (c) walk(source, c, [...stack, name], childInFn, out);
+				}
 				return;
 			}
 		}
-		for (const c of node.namedChildren) if (c) walk(source, c, stack, out);
+		for (const c of node.namedChildren) if (c) walk(source, c, stack, inFn, out);
 	};
-	return walk;
+	return (source, node, stack, out) => walk(source, node, stack, false, out);
 }
 
-type GenericLanguage = Exclude<LanguageId, 'typescript' | 'tsx' | 'javascript' | 'go' | 'python'>;
-
-const NODE_TYPES: Record<GenericLanguage, string[]> = {
-	rust: ['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition'],
-	java: ['class_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'annotation_type_declaration', 'method_declaration', 'constructor_declaration'],
-	c: ['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
-	cpp: ['function_definition', 'struct_specifier', 'class_specifier', 'enum_specifier', 'union_specifier', 'namespace_definition', 'type_definition'],
-	csharp: ['class_declaration', 'struct_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'namespace_declaration', 'delegate_declaration', 'method_declaration', 'constructor_declaration', 'property_declaration'],
-	ruby: ['method', 'singleton_method', 'class', 'module'],
-	php: ['function_definition', 'method_declaration', 'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration'],
-	swift: ['function_declaration', 'class_declaration', 'protocol_declaration', 'property_declaration'],
-	kotlin: ['function_declaration', 'class_declaration', 'object_declaration', 'property_declaration'],
-	scala: ['function_definition', 'class_definition', 'object_definition', 'trait_definition', 'type_definition', 'val_definition'],
-	bash: ['function_definition'],
+// One config per language. The compile-time Record<LanguageId, …> totality check
+// (which listDeclarations relies on) catches a missing language; functionLike /
+// valueBindings stay empty for languages that bind no value types or have no
+// function bodies (proto).
+const COLLECTORS: Record<LanguageId, Collector> = {
+	typescript: collectTsLike,
+	tsx: collectTsLike,
+	javascript: collectTsLike,
+	go: collectGo,
+	python: collectPython,
+	rust: namedCollector(
+		['function_item', 'struct_item', 'enum_item', 'union_item', 'trait_item', 'mod_item', 'type_item', 'const_item', 'static_item', 'macro_definition'],
+		{ functionLike: ['function_item'], valueBindings: ['const_item', 'static_item'] }
+	),
+	java: namedCollector(
+		['class_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'annotation_type_declaration', 'method_declaration', 'constructor_declaration'],
+		{ functionLike: ['method_declaration', 'constructor_declaration'] }
+	),
+	c: namedCollector(
+		['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
+		{ functionLike: ['function_definition'] }
+	),
+	cpp: namedCollector(
+		['function_definition', 'struct_specifier', 'class_specifier', 'enum_specifier', 'union_specifier', 'namespace_definition', 'type_definition'],
+		{ functionLike: ['function_definition'] }
+	),
+	csharp: namedCollector(
+		['class_declaration', 'struct_declaration', 'interface_declaration', 'enum_declaration', 'record_declaration', 'namespace_declaration', 'delegate_declaration', 'method_declaration', 'constructor_declaration', 'property_declaration'],
+		{ functionLike: ['method_declaration', 'constructor_declaration'] }
+	),
+	ruby: namedCollector(['method', 'singleton_method', 'class', 'module'], {
+		functionLike: ['method', 'singleton_method']
+	}),
+	php: namedCollector(
+		['function_definition', 'method_declaration', 'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration'],
+		{ functionLike: ['function_definition', 'method_declaration'] }
+	),
+	swift: namedCollector(['function_declaration', 'class_declaration', 'protocol_declaration', 'property_declaration'], {
+		functionLike: ['function_declaration'],
+		valueBindings: ['property_declaration']
+	}),
+	kotlin: namedCollector(['function_declaration', 'class_declaration', 'object_declaration', 'property_declaration'], {
+		functionLike: ['function_declaration'],
+		valueBindings: ['property_declaration']
+	}),
+	scala: namedCollector(
+		['function_definition', 'class_definition', 'object_definition', 'trait_definition', 'type_definition', 'val_definition'],
+		{ functionLike: ['function_definition'], valueBindings: ['val_definition'] }
+	),
+	bash: namedCollector(['function_definition'], { functionLike: ['function_definition'] }),
 	// proto: message (type-like), enum, service (interface-like), rpc
 	// (method-like), plus message fields and enum values. Unlike struct fields
 	// elsewhere, a proto field/value number is the wire contract and the most
 	// drift-prone thing in a schema, so `Message.field` is addressable. `field`
 	// covers oneof members too (the grammar reuses it); `value` is the enum
 	// constant. Field options/defaults are other node types and are not swept in.
-	proto: ['message', 'enum', 'service', 'rpc', 'field', 'map_field', 'value']
-};
-
-const COLLECTORS: Record<LanguageId, (s: string, n: Node, st: string[], o: Decl[]) => void> = {
-	typescript: collectTsLike,
-	tsx: collectTsLike,
-	javascript: collectTsLike,
-	go: collectGo,
-	python: collectPython,
-	rust: namedCollector(new Set(NODE_TYPES.rust)),
-	java: namedCollector(new Set(NODE_TYPES.java)),
-	c: namedCollector(new Set(NODE_TYPES.c)),
-	cpp: namedCollector(new Set(NODE_TYPES.cpp)),
-	csharp: namedCollector(new Set(NODE_TYPES.csharp)),
-	ruby: namedCollector(new Set(NODE_TYPES.ruby)),
-	php: namedCollector(new Set(NODE_TYPES.php)),
-	swift: namedCollector(new Set(NODE_TYPES.swift)),
-	kotlin: namedCollector(new Set(NODE_TYPES.kotlin)),
-	scala: namedCollector(new Set(NODE_TYPES.scala)),
-	bash: namedCollector(new Set(NODE_TYPES.bash)),
-	proto: namedCollector(new Set(NODE_TYPES.proto))
+	// No function bodies, so no scope flags.
+	proto: namedCollector(['message', 'enum', 'service', 'rpc', 'field', 'map_field', 'value'])
 };
 
 // Parsing a file is by far the dominant cost, and a document with many
@@ -368,7 +419,7 @@ export async function listDeclarations(source: string, file: string): Promise<De
 	if (!tree) throw new DocrefError('parse-failed', `could not parse ${file}`);
 	const out: Decl[] = [];
 	try {
-		collectorRoot(lang.id, source, tree.rootNode, out);
+		COLLECTORS[lang.id](source, tree.rootNode, [], out);
 	} finally {
 		tree.delete();
 	}
@@ -379,10 +430,6 @@ export async function listDeclarations(source: string, file: string): Promise<De
 		if (oldest !== undefined) declCache.delete(oldest);
 	}
 	return out;
-}
-
-function collectorRoot(id: LanguageId, source: string, root: Node, out: Decl[]): void {
-	COLLECTORS[id](source, root, [], out);
 }
 
 export async function findSymbol(source: string, file: string, fragment: string): Promise<Decl> {
