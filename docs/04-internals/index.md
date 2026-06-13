@@ -8,7 +8,7 @@ icon: "⚙️"
 A short tour of the core, with the relevant code embedded directly. Every
 fenced block below is a docref snippet: its body is materialized from the
 source and kept current by `docref refresh`, so this page cannot quietly drift
-from the implementation it describes. This is also the tool dogfooding itself —
+from the implementation it describes. This is also the tool dogfooding itself:
 the snippets here are real references that `docref check` resolves in CI.
 
 {% cards %}

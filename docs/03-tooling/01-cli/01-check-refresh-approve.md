@@ -1,6 +1,6 @@
 ---
 title: check, refresh, approve, diff
-description: The core CLI loop — report reference state, sync snippet bodies, approve claims after reading them, and review claim drift.
+description: The core CLI loop: report reference state, sync snippet bodies, approve claims after reading them, and review claim drift.
 ---
 
 # check, refresh, approve, diff

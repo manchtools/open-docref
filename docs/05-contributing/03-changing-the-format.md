@@ -1,7 +1,7 @@
 ---
 title: Changing the format
 label: Changing the format
-description: The format is a pre-1.0 contract — what to update when you change it, commit conventions, and how to report a security issue.
+description: The format is a pre-1.0 contract: what to update when you change it, commit conventions, and how to report a security issue.
 ---
 
 # Changing the format

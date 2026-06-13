@@ -1,6 +1,6 @@
 ---
 title: References
-description: The reference grammar — alias, path, and fragment — and what each part anchors.
+description: The reference grammar (alias, path, and fragment) and what each part anchors.
 ---
 
 # References

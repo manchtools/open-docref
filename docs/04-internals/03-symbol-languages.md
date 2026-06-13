@@ -33,8 +33,8 @@ That list is *which* files resolve; the table below is *what* each grammar
 exposes as a declaration. TypeScript, JavaScript, TSX, Go and Python use
 bespoke collectors; every other language is data-driven from this set of
 declaration node types. Proto is the notable case: it anchors messages, enums,
-services and rpcs, and — because a field number or enum value number is the
-wire contract, the most drift-prone part of a schema — message fields and enum
+services and rpcs, and (because a field number or enum value number is the
+wire contract, the most drift-prone part of a schema) message fields and enum
 values too, so `CreateRequest.shares` is addressable.
 
 ```ts docref=packages/core/src/symbols.ts#NODE_TYPES:bf2d9bd6
@@ -68,7 +68,7 @@ above:
 
 - **TypeScript / JavaScript / TSX:** functions (including generators), classes
   (including abstract), interfaces, type aliases, enums, methods, and top-level
-  `const`/`let`/`var` — but never a binding declared inside a function body;
+  `const`/`let`/`var`, but never a binding declared inside a function body;
   nested functions stay addressable.
 - **Go:** functions, methods (nested under their receiver type), and `type`,
   `const` and `var` specs.

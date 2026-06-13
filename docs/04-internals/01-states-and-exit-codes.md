@@ -12,8 +12,8 @@ around moving references between them (see [Format specification](/format) secti
 export type State = 'up-to-date' | 'stale-snippet' | 'stale-claim' | 'broken';
 ```
 
-A run of references collapses to a process exit code — clean, stale, or broken
-— which is what makes `check` a usable CI gate.
+A run of references collapses to a process exit code (clean, stale, or broken),
+which is what makes `check` a usable CI gate.
 
 ```ts docref=packages/core/src/ops.ts#exitCode:926bfd35
 export function exitCode(report: Report): 0 | 1 | 2 {

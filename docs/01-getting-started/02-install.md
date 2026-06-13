@@ -7,7 +7,7 @@ description: Install the docref CLI (a single standalone binary) and the VS Code
 
 ## The CLI
 
-The CLI is a single standalone binary — no Node, no npm, no registry account.
+The CLI is a single standalone binary: no Node, no npm, no registry account.
 The installer downloads the build for your platform from the latest release:
 
 ```sh
@@ -22,7 +22,7 @@ in [Contributing](/contributing).
 ## The VS Code extension
 
 <!-- docref: begin src=packages/cli/src/installext.ts#installExtension:2c3ee47f -->
-Install it straight from the CLI — it downloads the `.vsix` from the latest
+Install it straight from the CLI. It downloads the `.vsix` from the latest
 release and installs it into every VS Code-family editor it finds on `PATH`.
 <!-- docref: end -->
 

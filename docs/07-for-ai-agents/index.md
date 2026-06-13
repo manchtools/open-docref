@@ -1,6 +1,7 @@
 ---
 title: For AI agents
-description: The AI-agent contract — how an agent uses the same docref CLI to keep documentation honest after changing code.
+description: The AI-agent contract: how an agent uses the same docref CLI to keep documentation honest after changing code.
+icon: "🤖"
 ---
 
 # For AI agents
@@ -32,5 +33,5 @@ review it actually performed. `affected --json` gives it a precise work list
 instead of guessing which pages mention the changed code.
 
 The dedicated agent skill lives at `skills/docref/SKILL.md` in the repository
-(install it to `~/.claude/skills/docref/`), and the repository's `AGENTS.md` is
-the contributor-facing agent contract.
+(drop it into your agent's skills or rules directory), and the repository's
+`AGENTS.md` is the contributor-facing agent contract.

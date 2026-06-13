@@ -21,7 +21,7 @@ boundary and the risk of two resolvers disagreeing.
   rev into the cache. The user's existing credentials cover private
   repositories.
 - **Distribution: standalone binaries.** `bun build --compile` produces one
-  self-contained executable per platform with the tree-sitter wasm embedded —
+  self-contained executable per platform with the tree-sitter wasm embedded:
   no Node, no registry. They are attached to GitHub releases and installed via
   `install.sh` or `docref self-update`. In CI the install is one step before
   `docref check`.

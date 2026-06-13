@@ -57,8 +57,8 @@ editor; and an agent-ready JSON contract.
   anchor liberally and *natively while writing* — naming code in prose becomes a
   reference, code examples become snippets, behavioral assertions become claims,
   and documented spans get region markers at authoring time. Drop it in
-  `~/.claude/skills/` (global) or a project's `.claude/skills/`, or paste its
-  prime-directive and hard-rules sections into a standing `CLAUDE.md`/`AGENTS.md`.
+  your agent's skills or rules directory (globally or per project), or paste its
+  prime-directive and hard-rules sections into a standing `AGENTS.md`.
 - `docref install-extension`: bootstrap the editor from the CLI. It downloads
   the VS Code extension `.vsix` from the latest GitHub release and installs it
   into the VS Code-family editors found on `PATH` — VS Code, Insiders, VSCodium,

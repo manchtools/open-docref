@@ -1,6 +1,6 @@
 ---
 title: Quick start
-description: Anchor a symbol, materialize a snippet or write a claim, and run docref check — the whole loop end to end.
+description: Anchor a symbol, materialize a snippet or write a claim, and run docref check: the whole loop end to end.
 ---
 
 # Quick start
@@ -11,7 +11,7 @@ hash, and let `check` tell you when it drifts.
 {% steps %}
 {% step title="Reference code from a doc" %}
 In a markdown file, point a fenced code block at a symbol with `docref=`, or tie
-a paragraph to code with a claim comment. Don't type the hash — the tool fills
+a paragraph to code with a claim comment. Don't type the hash; the tool fills
 it in. Generate a paste-ready block from the CLI:
 
 ```sh
@@ -34,7 +34,7 @@ docref check
 ```
 
 It exits `0` when everything is up to date, `1` on a stale reference, and `2` on
-a broken one — so it doubles as a CI gate.
+a broken one, so it doubles as a CI gate.
 {% /step %}
 
 {% step title="Keep it honest as the code changes" %}
@@ -52,7 +52,7 @@ docref check                            # must be green before you're done
 {% callout type="info" title="In the editor" %}
 The [VS Code extension](/tooling/vscode-extension) does all of this inline:
 referenced-by CodeLens, stale/broken squiggles with quick fixes, autocomplete
-that attaches the hash, and a claim-block scaffold — see the extension page.
+that attaches the hash, and a claim-block scaffold. See the extension page.
 {% /callout %}
 
 Next: the normative [Format specification](/format), the full

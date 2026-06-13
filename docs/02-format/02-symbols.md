@@ -8,7 +8,7 @@ description: Symbol fragments, structural tree-sitter resolution, and the `@` si
 <!-- docref: begin src=packages/core/src/symbols.ts#listDeclarations:f87e8a33 -->
 
 A symbol fragment names a declaration: function, method, class, type,
-interface, enum, or top-level constant — and, where a language makes a
+interface, enum, or top-level constant; and, where a language makes a
 member's identity part of a contract, that member too: a protobuf message
 field or enum value, whose number is wire-breaking, anchors as
 `Message.field`. Nesting uses `.` (`Server.VerifySignature`). Resolution is

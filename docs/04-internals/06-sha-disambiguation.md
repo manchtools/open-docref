@@ -7,7 +7,7 @@ description: Telling the alias colon from the sha colon so the two never collide
 
 A ref is `[alias:]path[#fragment][:sha]`. The alias separator is the first
 colon, the sha suffix the last, and fragments cannot contain colons, so the
-two never collide — the parser proves which is which.
+two never collide: the parser proves which is which.
 
 ```ts docref=packages/core/src/markdown.ts#splitShaSuffix:30ec78f1
 export function splitShaSuffix(part: string): { ref: string; sha?: string } {

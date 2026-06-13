@@ -8,8 +8,8 @@ description: Every behaviour change ships with its tests in the same commit, ass
 
 Every behaviour change ships with its tests in the same commit. The bar is the
 one the milestones already set: each lands with tests that assert the
-**rejection** paths — broken refs, ambiguous symbols, tampered fences, nested
-claims, unsafe input — not only the happy path. A test that only checks "it
+**rejection** paths (broken refs, ambiguous symbols, tampered fences, nested
+claims, unsafe input), not only the happy path. A test that only checks "it
 works" is not enough; cover the correct, the absent, and the present-but-wrong,
 and derive the wrong case from what the format intends rather than from the code
 under test.

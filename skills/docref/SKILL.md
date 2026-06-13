@@ -318,13 +318,17 @@ refreshes the extension alongside the binary so the editor never lags.
 
 ## 10. Running this standalone vs. as a standing directive
 
-- **As a skill**: drop this file at `~/.claude/skills/docref/SKILL.md` (global)
-  or `<project>/.claude/skills/docref/SKILL.md` (per project). It will activate
-  on the triggers in the description above.
+This file is agent-agnostic — any coding agent or assistant can use it.
+
+- **As a skill / rule**: drop this file into whatever directory your agent loads
+  skills or rules from, globally or per project (for example an `AGENTS.md`
+  alongside your code, or your tool's skills/rules folder). It activates on the
+  triggers in the description above.
 - **As an always-on directive**: paste §0 (the prime directive) and §9 (hard
-  rules) into your global `CLAUDE.md` / `AGENTS.md`. That alone is enough to make
-  an agent anchor natively while it writes; pull in the rest of this file when
-  you need the exact syntax or commands.
+  rules) into your agent's standing instructions file (`AGENTS.md` or your
+  tool's equivalent). That alone is enough to make an agent anchor natively
+  while it writes; pull in the rest of this file when you need the exact syntax
+  or commands.
 
 Either way, the goal is the same: anchors go in **as you write**, generously,
 and `docref check` stays green.

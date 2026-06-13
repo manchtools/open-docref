@@ -1,6 +1,6 @@
 ---
 title: CI patterns
-description: How to wire docref into CI — gate every push, sync snippets mechanically, and watch cross-repo drift on a schedule.
+description: How to wire docref into CI: gate every push, sync snippets mechanically, and watch cross-repo drift on a schedule.
 ---
 
 # CI patterns
