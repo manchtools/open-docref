@@ -29,6 +29,7 @@ import protoWasm from '@open-docref/core/grammars/tree-sitter-proto.wasm' with {
 import { configureWasm } from '@open-docref/core';
 import { run, VERSION } from './main';
 import { selfUpdate } from './selfupdate';
+import { dispatchStandalone, emit } from './standalone-dispatch';
 
 // Keyed by the grammar `wasm` id from the registry (the value configureWasm
 // passes to the resolver), not the file extension.
@@ -54,10 +55,11 @@ const GRAMMARS: Record<string, string> = {
 
 configureWasm({ runtimeWasm, grammar: (id) => GRAMMARS[id] ?? id });
 
-const argv = process.argv.slice(2);
-const result =
-	argv[0] === 'self-update'
-		? await selfUpdate(VERSION, { skipExtension: argv.includes('--skip-extension') })
-		: await run(argv, process.cwd());
-if (result.out) console.log(result.out);
-process.exit(result.code);
+emit(
+	await dispatchStandalone(process.argv.slice(2), {
+		run,
+		selfUpdate,
+		version: VERSION,
+		cwd: process.cwd()
+	})
+);

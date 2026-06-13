@@ -21,12 +21,15 @@ import {
 	resolveReference,
 	claimBlockText,
 	snippetFenceText,
+	fenceLanguageForRef,
 	exitCode,
+	EXIT,
 	suggest,
 	type Report,
 	type ReportEntry
 } from '@open-docref/core';
 import { installExtension } from './installext';
+import { emit } from './standalone-dispatch';
 
 // Single source of truth for the version, pinned to package.json by a test
 // (main.test.ts) so a release bump cannot desync them. Read as a constant so
@@ -66,11 +69,23 @@ function popFlag(args: string[], flag: string): boolean {
 }
 
 function popValue(args: string[], flag: string): string | undefined {
+	// `--flag=value` form: take the value, consume the one token
+	const eq = args.findIndex((a) => a.startsWith(`${flag}=`));
+	if (eq !== -1) {
+		const value = args[eq]!.slice(flag.length + 1);
+		args.splice(eq, 1);
+		return value || undefined;
+	}
 	const at = args.indexOf(flag);
 	if (at === -1) return undefined;
-	const value = args[at + 1];
+	const next = args[at + 1];
+	// a following flag (or nothing) is NOT this flag's value — do not swallow it
+	if (next === undefined || next.startsWith('-')) {
+		args.splice(at, 1);
+		return undefined;
+	}
 	args.splice(at, 2);
-	return value;
+	return next;
 }
 
 function entryLine(e: ReportEntry): string {
@@ -122,11 +137,12 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 	if (popFlag(args, '--version') || popFlag(args, '-v') || args[0] === 'version') {
 		return { code: 0, out: VERSION };
 	}
+	// --json is the one genuinely global option; --check and --since are scoped
+	// to the commands that honor them (popped inside their cases below), so they
+	// are not silently accepted-and-ignored elsewhere
 	const json = popFlag(args, '--json');
-	const checkOnly = popFlag(args, '--check');
-	const since = popValue(args, '--since');
 	const [cmd, ...rest] = args;
-	const usage = (why: string) => ({ code: 2 as const, out: `${why}\n\n${USAGE}` });
+	const usage = (why: string) => ({ code: EXIT.broken, out: `${why}\n\n${USAGE}` });
 
 	try {
 		const project = () => loadProject(findRoot(cwd));
@@ -144,7 +160,7 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 			case 'approve': {
 				if (rest.length === 0) return usage('approve requires explicit paths');
 				const result = await approve(project(), rest);
-				const code = result.refused.length > 0 ? 2 : 0;
+				const code = result.refused.length > 0 ? EXIT.broken : EXIT.ok;
 				if (json) return { code, out: JSON.stringify(result, null, 2) };
 				const lines = [
 					`approved ${result.approved} claim(s) in ${result.changedDocs.length} file(s)`,
@@ -153,6 +169,7 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 				return { code, out: lines.join('\n') };
 			}
 			case 'update': {
+				const checkOnly = popFlag(rest, '--check');
 				const result = await update(project(), {
 					...(rest.length ? { aliases: rest } : {}),
 					checkOnly
@@ -165,6 +182,7 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 				return { code, out: [...lines, renderReport(result.report, false)].join('\n') };
 			}
 			case 'affected': {
+				const since = popValue(rest, '--since');
 				if (!since) return usage('affected requires --since <rev>');
 				const result = await affected(project(), since);
 				if (json) return { code: 0, out: JSON.stringify(result, null, 2) };
@@ -213,7 +231,7 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 			case 'snippet': {
 				if (rest.length !== 1) return usage('snippet takes exactly one ref (a fence materializes one anchor)');
 				const resolved = await resolveReference(project(), rest[0]!);
-				const lang = resolved.ref.split('#')[0]!.split('/').pop()!.split('.').pop() ?? '';
+				const lang = fenceLanguageForRef(resolved.ref);
 				const text = snippetFenceText(resolved.ref, resolved.sha, lang, resolved.content);
 				if (json) return { code: 0, out: JSON.stringify({ text, ref: resolved.ref, sha: resolved.sha }, null, 2) };
 				return { code: 0, out: text.trimEnd() };
@@ -230,7 +248,7 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 			}
 			case 'anchors': {
 				const result = await anchors(project());
-				const code = result.errors.length > 0 ? 2 : 0;
+				const code = result.errors.length > 0 ? EXIT.broken : EXIT.ok;
 				if (json) return { code, out: JSON.stringify(result, null, 2) };
 				const lines = [
 					...result.errors.map((e) => `error  ${e.file}:${e.line}  ${e.message}`),
@@ -264,14 +282,14 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 				// the compiled binary intercepts this before run(); reaching here
 				// means a node/source build, which updates through its package manager
 				return {
-					code: 2,
-					out: 'self-update replaces the compiled binary; a node/source install updates through its package manager instead.'
+					code: EXIT.broken,
+					out: 'self-update replaces the compiled binary; a node or source install updates through its package manager instead'
 				};
 			default:
 				return usage(`unknown command "${cmd ?? ''}"`);
 		}
 	} catch (e) {
-		return { code: 2, out: (e as Error).message };
+		return { code: EXIT.broken, out: (e as Error).message };
 	}
 }
 
@@ -290,7 +308,5 @@ export function isMainEntry(argv1: string | undefined, moduleUrl: string): boole
 }
 
 if (isMainEntry(process.argv[1], import.meta.url)) {
-	const { code, out } = await run(process.argv.slice(2), process.cwd());
-	if (out) console.log(out);
-	process.exit(code);
+	emit(await run(process.argv.slice(2), process.cwd()));
 }

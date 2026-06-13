@@ -3,7 +3,7 @@ import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { run, isMainEntry, VERSION } from './main';
-import { tmp, write, read } from '../../core/src/testutil';
+import { tmp, write, read, initRepo, commitAll, git } from '../../core/src/testutil';
 
 // CLI contract (tooling.md section 1): exit 0 all up to date, 1 stale
 // present, 2 broken or config/usage error. --json emits the machine
@@ -22,6 +22,19 @@ describe('version', () => {
 	it('prints the version with --version and -v, exit 0', async () => {
 		expect(await run(['--version'], process.cwd())).toEqual({ code: 0, out: pkgVersion });
 		expect(await run(['-v'], process.cwd())).toEqual({ code: 0, out: pkgVersion });
+	});
+
+	it('every workspace package version moves in lockstep', () => {
+		// core's version is otherwise dead (private, unpublished, nothing reads it);
+		// this pins it — and the cli + vsix versions — so a release bump cannot
+		// desync them. Self-discovering over the packages dir, not a hardcoded list.
+		const root = fileURLToPath(new URL('../../..', import.meta.url));
+		const versions = ['cli', 'core', 'vscode'].map(
+			(p) => JSON.parse(readFileSync(join(root, 'packages', p, 'package.json'), 'utf8')).version as string
+		);
+		expect(versions.length).toBeGreaterThan(0);
+		expect(new Set(versions).size).toBe(1); // all equal
+		expect(versions[0]).toBe(VERSION);
 	});
 });
 
@@ -177,6 +190,90 @@ describe('docref CLI', () => {
 		const res = await run(['frobnicate'], project());
 		expect(res.code).toBe(2);
 		expect(res.out.toLowerCase()).toContain('usage');
+	});
+});
+
+describe('CLI dispatch: the commands the report family does not cover', () => {
+	it('ls prints the reverse index and --json emits it', async () => {
+		const root = project();
+		await run(['refresh'], root);
+		const res = await run(['ls'], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toContain('src/lib.ts#greet');
+		const json = await run(['ls', '--json'], root);
+		expect(JSON.parse(json.out).refs[0].ref).toBe('src/lib.ts#greet');
+	});
+
+	it('suggest reports plainly when nothing is unanchored', async () => {
+		const root = tmp();
+		write(root, 'docs/x.md', '# just prose, no inline-code identifiers\n');
+		const res = await run(['suggest'], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toBe('no unanchored references found');
+	});
+
+	it('self-update on a node/source build explains it is binary-only, exit 2', async () => {
+		const res = await run(['self-update'], project());
+		expect(res.code).toBe(2);
+		expect(res.out).toContain('package manager');
+	});
+
+	it('update of an undeclared alias surfaces the error as exit 2', async () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[scan]\ninclude = ["docs/**"]\n');
+		const res = await run(['update', 'nope'], root);
+		expect(res.code).toBe(2);
+		expect(res.out).toContain('not declared');
+	});
+
+	it('update --check maps to checkOnly: reports drift, writes nothing; update then pins', async () => {
+		const remote = tmp('docref-remote-');
+		initRepo(remote);
+		write(remote, 'src/h.go', 'package api\n\nfunc Verify() bool {\n\treturn false\n}\n');
+		commitAll(remote, 'v1');
+		const root = tmp();
+		write(root, 'docref.toml', `[repos.lib]\nurl = "file://${remote}"\n`);
+		write(
+			root,
+			'docs/x.md',
+			['```go docref=lib:src/h.go#Verify', '```', ''].join('\n')
+		);
+
+		// establish the lock and materialize the snippet
+		await run(['update'], root);
+		expect(read(root, 'docs/x.md')).toContain('func Verify');
+
+		// the remote moves on
+		write(remote, 'src/h.go', 'package api\n\nfunc Verify() bool {\n\treturn true\n}\n');
+		commitAll(remote, 'v2');
+
+		const lockBefore = read(root, 'docref.lock');
+		const docBefore = read(root, 'docs/x.md');
+		const dry = await run(['update', '--check'], root);
+		// proves --check reached the render branch with checkOnly true
+		expect(dry.out).toContain('would pin');
+		expect(dry.out).not.toContain('pinned');
+		// and wrote nothing — byte-identical lock and doc
+		expect(read(root, 'docref.lock')).toBe(lockBefore);
+		expect(read(root, 'docs/x.md')).toBe(docBefore);
+
+		const real = await run(['update'], root);
+		expect(real.out).toContain('pinned');
+		expect(real.out).not.toContain('would pin');
+		expect(read(root, 'docref.lock')).not.toBe(lockBefore);
+		expect(read(root, 'docs/x.md')).toContain('return true');
+	});
+
+	it('affected accepts the --since=<rev> form, and a value-less --since is a usage error', async () => {
+		const root = tmp();
+		initRepo(root);
+		write(root, 'docs/x.md', '# x\n');
+		commitAll(root, 'base');
+		const rev = git(root, 'rev-parse', 'HEAD').trim();
+		// =value form binds the rev (popValue hardening)
+		expect((await run(['affected', `--since=${rev}`], root)).code).toBe(0);
+		// a bare trailing --since has no value -> usage error, not undefined-bound
+		expect((await run(['affected', '--since'], root)).code).toBe(2);
 	});
 });
 
