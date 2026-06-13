@@ -13,6 +13,7 @@ import {
 	refresh,
 	approve,
 	update,
+	addRepo,
 	affected,
 	ls,
 	anchors,
@@ -51,6 +52,8 @@ commands:
   update [aliases...]         pin cross-repo aliases to their branch tips
          --check              dry run: report drift, write nothing
          --strict|--lenient|--advisory   gate level (as for check)
+  repo add <alias> <url>      declare a cross-repo alias and lock it in one step
+         --ref <branch>       branch to track (default: the remote default)
   diff [paths...]             what changed since each stale claim was approved
   affected --since <rev>      references endangered by changes since <rev>
   suggest                     prose that names anchorable code but isn't anchored
@@ -226,6 +229,22 @@ export async function run(argv: string[], cwd: string): Promise<{ code: number; 
 					(c) => `${checkOnly ? 'would pin' : 'pinned'}  ${c.alias}  ${c.from?.slice(0, 12) ?? '(new)'} -> ${c.to.slice(0, 12)}`
 				);
 				return { code, out: [...lines, renderReport(result.report, false, level)].join('\n') };
+			}
+			case 'repo': {
+				const sub = rest.shift();
+				if (sub !== 'add') {
+					return usage(`unknown repo subcommand "${sub ?? ''}" (try: repo add <alias> <url>)`);
+				}
+				const ref = popValue(rest, '--ref');
+				const [alias, url] = rest;
+				if (!alias || !url) return usage('repo add takes an alias and a url: repo add <alias> <url> [--ref <branch>]');
+				const result = await addRepo(project(), { alias, url, ...(ref ? { ref } : {}) });
+				if (json) return { code: EXIT.ok, out: JSON.stringify(result, null, 2) };
+				const refNote = result.ref ? ` (${result.ref})` : '';
+				return {
+					code: EXIT.ok,
+					out: `added ${result.alias} -> ${result.url}${refNote}, pinned ${result.rev.slice(0, 12)}`
+				};
 			}
 			case 'affected': {
 				const since = popValue(rest, '--since');

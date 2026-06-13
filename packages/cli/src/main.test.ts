@@ -273,6 +273,31 @@ describe('CLI dispatch: the commands the report family does not cover', () => {
 		const res = await run(['update', 'nope'], root);
 		expect(res.code).toBe(2);
 		expect(res.out).toContain('not declared');
+		// the error points at the one-step fix
+		expect(res.out).toContain('docref repo add nope');
+	});
+
+	it('repo add declares an alias and pins it in one step', async () => {
+		const remote = tmp('docref-remote-');
+		initRepo(remote);
+		write(remote, 'src/h.go', 'package api\n\nfunc Verify() {}\n');
+		commitAll(remote, 'v1');
+		const root = tmp();
+		const res = await run(['repo', 'add', 'lib', `file://${remote}`], root);
+		expect(res.code).toBe(0);
+		expect(res.out).toContain('added lib');
+		expect(read(root, 'docref.toml')).toContain('[repos.lib]');
+		const tip = git(remote, 'rev-parse', 'HEAD').trim();
+		expect(read(root, 'docref.lock')).toContain(tip);
+	});
+
+	it('repo add without both an alias and a url is a usage error', async () => {
+		expect((await run(['repo', 'add', 'lib'], tmp())).code).toBe(2);
+		expect((await run(['repo', 'add'], tmp())).code).toBe(2);
+	});
+
+	it('an unknown repo subcommand is a usage error', async () => {
+		expect((await run(['repo', 'list'], tmp())).code).toBe(2);
 	});
 
 	it('update --check maps to checkOnly: reports drift, writes nothing; update then pins', async () => {

@@ -14,6 +14,8 @@ import {
 	check,
 	refresh,
 	approve,
+	addRepo,
+	isKebabName,
 	ls,
 	anchors,
 	diff,
@@ -45,6 +47,7 @@ import {
 	noReferenceablesMessage,
 	diagnosticsFromReport,
 	quickFixesForState,
+	crossRepoAlias,
 	buildReferencesTree,
 	buildAnchorsTree,
 	buildStageTree,
@@ -650,6 +653,12 @@ export function activate(context: vscode.ExtensionContext): void {
 				}
 				if (fixes.approve) make('docref: Approve claims in this document', 'docref.approveClaims', [], diag);
 				if (fixes.refresh) make('docref: Refresh stale snippets', 'docref.refreshSnippets', [], diag);
+				// a broken cross-repo ref is usually an undeclared alias; offer the
+				// one-step fix, prefilled with the alias parsed from the ref
+				if (info?.ref && String(diag.code) === 'broken') {
+					const alias = crossRepoAlias(info.ref);
+					if (alias) make(`docref: Add repository for "${alias}"…`, 'docref.addRepository', [alias], diag);
+				}
 			}
 			return actions;
 		}
@@ -730,6 +739,49 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			await editor.insertSnippet(new vscode.SnippetString(claimScaffoldSnippet()));
 			await vscode.commands.executeCommand('editor.action.triggerSuggest');
+		}),
+		// Declare a cross-repo alias and lock it in one step (the editor side of
+		// `docref repo add`). Invoked from the palette, or from the broken-ref
+		// quick fix prefilled with the undeclared alias.
+		vscode.commands.registerCommand('docref.addRepository', async (prefilledAlias?: string) => {
+			const p = project();
+			if (!p) {
+				void vscode.window.showWarningMessage('docref: open a workspace with a docref.toml first.');
+				return;
+			}
+			const alias = await vscode.window.showInputBox({
+				title: 'docref: add repository',
+				prompt: 'Alias for the cross-repo reference',
+				value: typeof prefilledAlias === 'string' ? prefilledAlias : '',
+				validateInput: (v) =>
+					isKebabName(v.trim())
+						? null
+						: 'lowercase letters, digits, and hyphens; must start with a letter or digit'
+			});
+			if (!alias) return;
+			const url = await vscode.window.showInputBox({
+				title: 'docref: add repository',
+				prompt: 'Repository URL',
+				placeHolder: 'https://github.com/org/repo (or ssh://, git://, file://, user@host:path)'
+			});
+			if (!url) return;
+			const ref = await vscode.window.showInputBox({
+				title: 'docref: add repository',
+				prompt: 'Branch to track (optional; default: the remote default branch)'
+			});
+			try {
+				const result = await addRepo(p, {
+					alias: alias.trim(),
+					url: url.trim(),
+					...(ref?.trim() ? { ref: ref.trim() } : {})
+				});
+				void vscode.window.showInformationMessage(
+					`docref: added "${result.alias}", pinned ${result.rev.slice(0, 12)}`
+				);
+				await rescan();
+			} catch (e) {
+				void vscode.window.showErrorMessage(`docref: ${(e as Error).message}`);
+			}
 		}),
 		vscode.commands.registerCommand('docref.rescan', () => rescan()),
 		vscode.commands.registerCommand('docref.refreshSnippets', async () => {

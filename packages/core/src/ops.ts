@@ -7,10 +7,10 @@ import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { glob } from 'tinyglobby';
 import type { Project, GateLevel } from './config';
-import { writeLock } from './config';
+import { writeLock, appendRepoBlock } from './config';
 import { DocrefError } from './errors';
 import { contentHash, shortHash, hashesMatch, SHORT_HASH_LEN } from './hash';
-import { parseRef } from './ref';
+import { parseRef, isKebabName, KEBAB_NAME } from './ref';
 import {
 	scanMarkdown,
 	rewriteSnippets,
@@ -27,7 +27,7 @@ import {
 	type SnippetEdit
 } from './markdown';
 import { workingTreeSource, resolveAnchor, type Anchor, type FileSource } from './resolve';
-import { branchTip, gitRevSource } from './gitcache';
+import { branchTip, gitRevSource, assertUrl, assertRef } from './gitcache';
 import { scanRegions } from './regions';
 import { listDeclarations } from './symbols';
 import { languageForFile } from './languages';
@@ -134,7 +134,7 @@ function sourcePool(project: Project, overrides?: RevOverrides) {
 		} else {
 			const repo = project.repos[alias];
 			if (!repo) {
-				throw new DocrefError('undeclared-alias', `alias "${alias}" is not declared in docref.toml`);
+				throw new DocrefError('undeclared-alias', `alias "${alias}" is not declared in docref.toml; add it with: docref repo add ${alias} <url>`);
 			}
 			const rev = overrides?.[alias] ?? project.lock[alias]?.rev;
 			if (!rev) {
@@ -394,7 +394,7 @@ export async function update(
 	for (const alias of targets) {
 		const repo = project.repos[alias];
 		if (!repo) {
-			throw new DocrefError('undeclared-alias', `alias "${alias}" is not declared in docref.toml`);
+			throw new DocrefError('undeclared-alias', `alias "${alias}" is not declared in docref.toml; add it with: docref repo add ${alias} <url>`);
 		}
 		const tip = branchTip(repo.url, repo.ref);
 		overrides[alias] = tip;
@@ -416,6 +416,37 @@ export async function update(
 	writeLock(project);
 	const { report } = await refresh(project);
 	return { changed, report };
+}
+
+export type AddRepoResult = { alias: string; url: string; ref?: string; rev: string };
+
+/**
+ * Declare a cross-repo alias and pin it in one step: validate, append a
+ * `[repos.<alias>]` block to docref.toml (preserving the rest of the file), then
+ * `update()` it to fetch the branch tip and write the lock. Fails closed BEFORE
+ * writing anything if the alias is malformed or already declared, or the url/ref
+ * is unsafe — the same boundary validators the config loader uses, so an
+ * option-shaped or `transport::address` value can never reach git.
+ */
+export async function addRepo(
+	project: Project,
+	spec: { alias: string; url: string; ref?: string }
+): Promise<AddRepoResult> {
+	const { alias, url, ref } = spec;
+	if (!isKebabName(alias)) {
+		throw new DocrefError('invalid-alias', `alias "${alias}" must match ${KEBAB_NAME.source}`);
+	}
+	if (project.repos[alias]) {
+		throw new DocrefError('alias-exists', `alias "${alias}" is already declared in docref.toml`);
+	}
+	assertUrl(url);
+	if (ref !== undefined) assertRef(ref);
+
+	appendRepoBlock(project.root, alias, url, ref);
+	// reflect it in-memory so update() sees the new alias, then lock its tip
+	project.repos[alias] = { url, ...(ref ? { ref } : {}) };
+	await update(project, { aliases: [alias] });
+	return { alias, url, ...(ref ? { ref } : {}), rev: project.lock[alias]!.rev };
 }
 
 export type ClaimDriftEntry = {

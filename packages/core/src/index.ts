@@ -25,6 +25,7 @@ export {
 	refresh,
 	approve,
 	update,
+	addRepo,
 	affected,
 	ls,
 	anchors,
@@ -46,6 +47,7 @@ export {
 	type ReportEntry,
 	type ReportError,
 	type UpdateResult,
+	type AddRepoResult,
 	type AffectedEntry,
 	type RefIndex
 } from './ops';

@@ -2,8 +2,18 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadProject } from './config';
-import { check, refresh, approve, update, affected, ls, anchors, diff, remove, exitCode, exitCodeFor, suggest, type Report } from './ops';
+import { check, refresh, approve, update, addRepo, affected, ls, anchors, diff, remove, exitCode, exitCodeFor, suggest, type Report } from './ops';
+import { DocrefError } from './errors';
 import { tmp, write, read, initRepo, commitAll, git } from './testutil';
+
+const errCode = async (e: () => Promise<unknown>): Promise<string> => {
+	try {
+		await e();
+		return 'no-error';
+	} catch (err) {
+		return (err as DocrefError).code;
+	}
+};
 
 // Integration contract for the operations (tooling.md section 1 against the
 // format in format.md): check reports the four states without writing;
@@ -644,6 +654,82 @@ describe('diff: recovering what the approver saw', () => {
 		// snippet is stale (never refreshed), claim is up to date
 		const { entries } = await diff(loadProject(root));
 		expect(entries).toEqual([]);
+	});
+});
+
+describe('addRepo: declare and lock a cross-repo alias in one step', () => {
+	function remote(): string {
+		const r = tmp('docref-remote-');
+		initRepo(r);
+		write(r, 'src/handler.go', 'package api\n\nfunc Verify() {}\n');
+		commitAll(r, 'v1');
+		return r;
+	}
+
+	it('appends the alias to docref.toml, locks the tip, and resolves on reload', async () => {
+		const url = `file://${remote()}`;
+		const root = tmp();
+		write(root, 'docref.toml', '[scan]\ninclude = ["docs/**/*.md"]\n');
+		const res = await addRepo(loadProject(root), { alias: 'lib', url });
+		expect(res.alias).toBe('lib');
+		expect(res.rev).toMatch(/^[0-9a-f]{7,}$/);
+		const toml = read(root, 'docref.toml');
+		expect(toml).toContain('[repos.lib]');
+		expect(toml).toContain(`url = "${url}"`);
+		// the existing content is preserved (append, never re-serialize)
+		expect(toml).toContain('[scan]');
+		expect(toml).toContain('include = ["docs/**/*.md"]');
+		// the lock pins it and a fresh load resolves the alias
+		expect(read(root, 'docref.lock')).toContain(res.rev);
+		const p = loadProject(root);
+		expect(p.repos.lib?.url).toBe(url);
+		expect(p.lock.lib?.rev).toBe(res.rev);
+	});
+
+	it('creates docref.toml when none exists', async () => {
+		const root = tmp();
+		await addRepo(loadProject(root), { alias: 'lib', url: `file://${remote()}` });
+		expect(read(root, 'docref.toml')).toContain('[repos.lib]');
+	});
+
+	it('records an explicit ref', async () => {
+		const root = tmp();
+		await addRepo(loadProject(root), { alias: 'lib', url: `file://${remote()}`, ref: 'main' });
+		expect(read(root, 'docref.toml')).toContain('ref = "main"');
+	});
+
+	it('rejects an invalid alias name and writes nothing', async () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[scan]\n');
+		expect(
+			await errCode(() => addRepo(loadProject(root), { alias: 'Bad_Alias', url: `file://${remote()}` }))
+		).toBe('invalid-alias');
+		expect(read(root, 'docref.toml')).not.toContain('repos');
+	});
+
+	it('rejects an unsafe url (transport::address) before touching the file', async () => {
+		const root = tmp();
+		write(root, 'docref.toml', '[scan]\n');
+		expect(
+			await errCode(() => addRepo(loadProject(root), { alias: 'lib', url: 'ext::sh -c whoami' }))
+		).toBe('unsafe-url');
+		expect(read(root, 'docref.toml')).not.toContain('repos');
+	});
+
+	it('rejects an unsafe ref', async () => {
+		const root = tmp();
+		expect(
+			await errCode(() =>
+				addRepo(loadProject(root), { alias: 'lib', url: `file://${remote()}`, ref: '--upload-pack=x' })
+			)
+		).toBe('unsafe-ref');
+	});
+
+	it('rejects an alias that is already declared', async () => {
+		const url = `file://${remote()}`;
+		const root = tmp();
+		write(root, 'docref.toml', `[repos.lib]\nurl = "${url}"\n`);
+		expect(await errCode(() => addRepo(loadProject(root), { alias: 'lib', url }))).toBe('alias-exists');
 	});
 });
 

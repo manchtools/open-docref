@@ -218,6 +218,21 @@ export function diagnosticsFromReport(
 	return byDoc;
 }
 
+/**
+ * The alias of a cross-repo ref (`lib:path#sym` → `lib`), or null for a
+ * same-repo ref. Lets a broken-ref quick fix offer "Add repository" prefilled
+ * with the undeclared alias. The `:` must precede the `#`, so a fragment can
+ * never be mistaken for an alias separator.
+ */
+export function crossRepoAlias(ref: string): string | null {
+	const colon = ref.indexOf(':');
+	if (colon === -1) return null;
+	const hash = ref.indexOf('#');
+	if (hash !== -1 && colon > hash) return null;
+	const alias = ref.slice(0, colon);
+	return isKebabName(alias) ? alias : null;
+}
+
 export type QuickFixes = {
 	openCode: boolean; // jump to the referenced source declaration/region
 	showDiff: boolean; // open the approved-vs-current drift diff for the claim

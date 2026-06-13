@@ -107,6 +107,24 @@ export function writeLock(project: Project): void {
 	writeFileSync(join(project.root, 'docref.lock'), stringifyToml({ repos: project.lock }) + '\n');
 }
 
+/**
+ * Append a `[repos.<alias>]` table to docref.toml, preserving everything already
+ * in the file (comments, ordering, other tables) — docref.toml is user-authored,
+ * so it is never re-serialized. The caller validates alias/url/ref first; all
+ * three are constrained to shapes with no quotes or newlines, so they are safe
+ * to embed verbatim and the result is always valid TOML.
+ */
+export function appendRepoBlock(root: string, alias: string, url: string, ref?: string): void {
+	const path = join(root, 'docref.toml');
+	let prefix = existsSync(path) ? readFileSync(path, 'utf8') : '';
+	if (prefix !== '') {
+		if (!prefix.endsWith('\n')) prefix += '\n';
+		prefix += '\n'; // a blank line before the new table
+	}
+	const block = [`[repos.${alias}]`, `url = "${url}"`, ...(ref ? [`ref = "${ref}"`] : [])].join('\n');
+	writeFileSync(path, prefix + block + '\n');
+}
+
 /** Walk up from cwd to the nearest docref.toml; fall back to cwd itself. */
 export function findRoot(cwd: string): string {
 	let dir = cwd;

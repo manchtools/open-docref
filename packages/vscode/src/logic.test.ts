@@ -12,6 +12,7 @@ import {
 	symbolFragmentForSelection,
 	diagnosticsFromReport,
 	quickFixesForState,
+	crossRepoAlias,
 	buildReferencesTree,
 	buildAnchorsTree,
 	buildStageTree,
@@ -314,6 +315,19 @@ describe('diagnosticsFromReport: severity by gate level', () => {
 		expect(diagnosticsFromReport(withUnused, 'lenient').get('src/x.ts')![0]!.severity).toBe(
 			'information'
 		);
+	});
+});
+
+describe('crossRepoAlias', () => {
+	it('extracts the alias from a cross-repo ref so the quick fix can prefill it', () => {
+		expect(crossRepoAlias('lib:src/a.go#Verify')).toBe('lib');
+		expect(crossRepoAlias('open-secret:src/a.go#Server.Verify')).toBe('open-secret');
+		expect(crossRepoAlias('lib:config/default.toml')).toBe('lib');
+	});
+	it('returns null for a same-repo ref (no alias to add)', () => {
+		expect(crossRepoAlias('src/a.ts#greet')).toBeNull();
+		expect(crossRepoAlias('config/default.toml')).toBeNull();
+		expect(crossRepoAlias('src/a.ts#@region')).toBeNull();
 	});
 });
 

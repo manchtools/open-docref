@@ -41,6 +41,11 @@
 				"title": "Docref: Create Anchor from Selection"
 			},
 			{
+				"command": "docref.addRepository",
+				"title": "Docref: Add Repository",
+				"icon": "$(repo)"
+			},
+			{
 				"command": "docref.insertClaimBlock",
 				"title": "Docref: Insert Claim Block",
 				"icon": "$(note)"
