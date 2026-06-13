@@ -23,9 +23,10 @@ import {
 	claimBlockText,
 	listDeclarations,
 	languageForFile,
+	fenceLanguageForRef,
 	scanRegions,
-	extractRegion,
-	contentHash,
+	dedent,
+	shortHash,
 	anchorFiles,
 	type Project,
 	type Report,
@@ -48,6 +49,7 @@ import {
 	buildAnchorsTree,
 	buildStageTree,
 	isRelevantChange,
+	relPath,
 	statusText,
 	refCompletionContext,
 	pathCompletionsFromFiles,
@@ -93,13 +95,14 @@ async function fragmentCompletions(
 	}
 	const items: vscode.CompletionItem[] = [];
 
-	for (const name of scanRegions(text).regions.keys()) {
-		let sha: string;
-		try {
-			sha = contentHash(extractRegion(text, name)).slice(0, 8);
-		} catch {
-			continue;
-		}
+	// scan the source's regions ONCE; the per-region content (markers excluded,
+	// dedented) is the SAME transform resolveAnchor applies, so the sha shown
+	// here is the sha `check` will compute — an inserted ref is immediately
+	// up to date, never spuriously stale.
+	const lines = text.split('\n');
+	for (const [name, region] of scanRegions(text).regions) {
+		const body = dedent(lines.slice(region.beginLine, region.endLine - 1).join('\n'));
+		const sha = shortHash(body);
 		const item = new vscode.CompletionItem('@' + name, vscode.CompletionItemKind.Reference);
 		// `@` is part of the fragment: add it only when the user has not yet typed it
 		item.insertText = `${kind === 'region' ? '' : '@'}${name}:${sha}`;
@@ -112,7 +115,7 @@ async function fragmentCompletions(
 		try {
 			for (const d of await listDeclarations(text, path)) {
 				const name = d.path.join('.');
-				const sha = contentHash(d.content).slice(0, 8);
+				const sha = shortHash(d.content);
 				const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Function);
 				item.insertText = `${name}:${sha}`;
 				item.detail = `symbol · ${sha}`;
@@ -124,6 +127,18 @@ async function fragmentCompletions(
 		}
 	}
 	return items;
+}
+
+/** The fence info-string word for a ref's file (its extension), via the real ref
+ * grammar — never throwing, so a malformed ref just yields the fallback. Replaces
+ * the stacked `split('#')[0]!.split('/').pop()!.split('.').pop()` munging, which
+ * returned the whole path (a bogus fence word) for a dotless file. */
+function fenceLang(ref: string, fallback = ''): string {
+	try {
+		return fenceLanguageForRef(ref) || fallback;
+	} catch {
+		return fallback;
+	}
 }
 
 let report: Report | null = null;
@@ -140,10 +155,6 @@ function project(): Project | null {
 	return ws ? loadProject(findRoot(ws)) : null;
 }
 
-function relPath(uri: vscode.Uri, root: string): string {
-	return uri.fsPath.startsWith(root + '/') ? uri.fsPath.slice(root.length + 1) : uri.fsPath;
-}
-
 const STATE_ICONS: Record<string, vscode.ThemeIcon> = {
 	'up-to-date': new vscode.ThemeIcon('check'),
 	'stale-snippet': new vscode.ThemeIcon('warning'),
@@ -152,7 +163,7 @@ const STATE_ICONS: Record<string, vscode.ThemeIcon> = {
 	unknown: new vscode.ThemeIcon('question')
 };
 
-class SidebarTree implements vscode.TreeDataProvider<SidebarNode> {
+class SidebarTree implements vscode.TreeDataProvider<SidebarNode>, vscode.Disposable {
 	private emitter = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this.emitter.event;
 
@@ -160,6 +171,12 @@ class SidebarTree implements vscode.TreeDataProvider<SidebarNode> {
 
 	refresh(): void {
 		this.emitter.fire();
+	}
+
+	// the tree registration disposes the registration, not this emitter; own its
+	// lifecycle so it does not leak across activate/deactivate cycles
+	dispose(): void {
+		this.emitter.dispose();
 	}
 
 	getTreeItem(n: SidebarNode): vscode.TreeItem {
@@ -237,7 +254,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		let opened = 0;
 		for (const e of entries) {
 			if (e.approvedContent === undefined || e.currentContent === undefined) continue;
-			const ext = e.ref.split('#')[0]!.split('.').pop() ?? 'txt';
+			const ext = fenceLang(e.ref, 'txt');
 			const token = driftSeq++;
 			const left = vscode.Uri.parse(`docref-drift:/${token}/approved.${ext}`);
 			const right = vscode.Uri.parse(`docref-drift:/${token}/current.${ext}`);
@@ -303,7 +320,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			void vscode.window.showWarningMessage(`docref: ${n.ref} does not resolve right now.`);
 			return;
 		}
-		const lang = n.ref.split('#')[0]!.split('/').pop()!.split('.').pop() ?? '';
+		const lang = fenceLang(n.ref);
 		const text =
 			kind === 'claim'
 				? claimBlockText([{ ref: n.ref, sha: resolved.sha }])
@@ -314,6 +331,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	}
 
 	let pending: NodeJS.Timeout | undefined;
+	// Derived from the indexes and only changing on rescan, so they are computed
+	// once here rather than rebuilt from the whole index on every '**/*' fs event
+	// (which fires constantly for build/.git churn). Named distinctly so they do
+	// not shadow the imported core `anchorFiles`.
+	let cachedRefPaths = new Set<string>();
+	let cachedAnchorFileSet = new Set<string>();
 	async function rescan(): Promise<void> {
 		const p = project();
 		if (!p) return;
@@ -326,6 +349,13 @@ export function activate(context: vscode.ExtensionContext): void {
 			void vscode.window.showErrorMessage(`docref: ${(e as Error).message}`);
 			return;
 		}
+		cachedRefPaths = new Set(
+			index.refs
+				.map((r) => r.ref)
+				.filter((ref) => !ref.includes(':'))
+				.map((ref) => ref.split('#')[0]!)
+		);
+		cachedAnchorFileSet = new Set(anchorIndex.anchors.map((a) => a.file));
 		diagnostics.clear();
 		actionableAt = new Map();
 		for (const [doc, list] of diagnosticsFromReport(report)) {
@@ -360,16 +390,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	const watcher = vscode.workspace.createFileSystemWatcher('**/*');
 	function onFsEvent(uri: vscode.Uri): void {
 		const root = workspaceRoot();
-		if (!root || !uri.fsPath.startsWith(root + '/')) return;
-		const rel = relPath(uri, root).split('\\').join('/');
-		const refPaths = new Set(
-			(index?.refs ?? [])
-				.map((r) => r.ref)
-				.filter((ref) => !ref.includes(':'))
-				.map((ref) => ref.split('#')[0]!)
-		);
-		const anchorFiles = new Set((anchorIndex?.anchors ?? []).map((a) => a.file));
-		if (isRelevantChange(rel, refPaths, anchorFiles)) rescanSoon();
+		if (!root) return;
+		const rel = relPath(root, uri.fsPath);
+		if (rel === null) return; // outside the workspace (POSIX/Windows correct)
+		if (isRelevantChange(rel, cachedRefPaths, cachedAnchorFileSet)) rescanSoon();
 	}
 
 	async function refFromSelection(): Promise<string | null> {
@@ -380,7 +404,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			return null;
 		}
 		const doc = editor.document;
-		const rel = relPath(doc.uri, root).split('\\').join('/');
+		const rel = relPath(root, doc.uri.fsPath) ?? '';
 		const [startLine, endLine] = normalizeSelectionLines(
 			editor.selection.start.line + 1,
 			editor.selection.end.line + 1,
@@ -460,7 +484,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				void vscode.window.showWarningMessage('docref: cannot materialize, the ref does not resolve.');
 				return;
 			}
-			const lang = ref.split('#')[0]!.split('/').pop()!.split('.').pop() ?? '';
+			const lang = fenceLang(ref);
 			await vscode.env.clipboard.writeText(
 				snippetFenceText(ref, resolved.sha, lang, resolved.content)
 			);
@@ -476,7 +500,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		async provideCodeLenses(doc) {
 			const root = workspaceRoot();
 			if (!root || !index) return [];
-			const rel = relPath(doc.uri, root).split('\\').join('/');
+			const rel = relPath(root, doc.uri.fsPath) ?? '';
 			const mine = index.refs.filter((r) => r.ref.split('#')[0] === rel && !r.ref.includes(':'));
 			if (mine.length === 0) return [];
 
@@ -594,7 +618,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		provideCodeActions(doc, _range, ctx) {
 			const root = workspaceRoot();
 			if (!root) return;
-			const rel = relPath(doc.uri, root).split('\\').join('/');
+			const rel = relPath(root, doc.uri.fsPath) ?? '';
 			const actions: vscode.CodeAction[] = [];
 			const make = (
 				title: string,
@@ -629,6 +653,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		diagnostics,
 		status,
+		tree, // dispose the trees' own EventEmitters (the registration disposable does not)
+		anchorTree,
+		stageTree,
 		vscode.window.registerTreeDataProvider('docrefRefs', tree),
 		vscode.window.registerTreeDataProvider('docrefAnchors', anchorTree),
 		vscode.window.registerTreeDataProvider('docrefStaged', stageTree),
@@ -715,7 +742,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('docref.showDrift', async () => {
 			const editor = vscode.window.activeTextEditor;
 			const root = workspaceRoot();
-			const rel = editor && root ? relPath(editor.document.uri, root).split('\\').join('/') : undefined;
+			const rel = editor && root ? (relPath(root, editor.document.uri.fsPath) ?? undefined) : undefined;
 			const { opened, total } = await openDrift(rel?.endsWith('.md') ? { doc: rel } : undefined);
 			if (opened === 0) {
 				void vscode.window.showInformationMessage(
@@ -730,7 +757,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const editor = vscode.window.activeTextEditor;
 			const root = workspaceRoot();
 			if (!p || !editor || !root) return;
-			const rel = relPath(editor.document.uri, root).split('\\').join('/');
+			const rel = relPath(root, editor.document.uri.fsPath) ?? '';
 			// show the evidence first: one diff tab per recoverable claim
 			const { opened } = await openDrift({ doc: rel });
 			const confirmed = await vscode.window.showWarningMessage(

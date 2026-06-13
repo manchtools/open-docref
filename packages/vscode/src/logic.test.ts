@@ -17,6 +17,7 @@ import {
 	buildStageTree,
 	type SidebarNode,
 	isRelevantChange,
+	relPath,
 	statusText,
 	refCompletionContext,
 	pathCompletionsFromFiles
@@ -27,6 +28,25 @@ import {
 // and testable: leader detection, marker emission that round-trips through
 // the core scanner, symbol-vs-region choice (exact span only), report to
 // diagnostics mapping, the tree model, and the status line.
+
+describe('relPath: a Uri fsPath as a repo-relative POSIX path', () => {
+	it('strips the root, on both POSIX and Windows separators', () => {
+		expect(relPath('/home/u/proj', '/home/u/proj/docs/x.md')).toBe('docs/x.md');
+		// Windows: backslash fsPath under a backslash root. The old
+		// `fsPath.startsWith(root + '/')` failed here and returned the absolute
+		// path; the squiggles, watcher and quick-fix lookup then keyed off a path
+		// that never matched (fail-open).
+		expect(relPath('C:\\Users\\u\\proj', 'C:\\Users\\u\\proj\\docs\\x.md')).toBe('docs/x.md');
+		expect(relPath('/r', '/r')).toBe(''); // the root itself
+	});
+
+	it('returns null for a path outside the root (so the watcher can ignore it)', () => {
+		expect(relPath('/home/u/proj', '/home/u/other/x.md')).toBeNull();
+		expect(relPath('C:\\proj', 'D:\\elsewhere\\x.md')).toBeNull();
+		// a sibling whose name merely shares the root prefix is NOT under it
+		expect(relPath('/home/u/proj', '/home/u/proj-2/x.md')).toBeNull();
+	});
+});
 
 describe('commentLeaderFor', () => {
 	it('knows line-comment families', () => {

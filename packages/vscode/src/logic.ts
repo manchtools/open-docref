@@ -2,7 +2,23 @@
 // unit-testable: comment-leader detection, marker emission, the
 // symbol-vs-region choice, and the mappings from core reports to
 // diagnostics, tree nodes, and the status line.
+import { isKebabName } from '@open-docref/core';
 import type { AnchorsResult, Decl, Report, RefIndex, State } from '@open-docref/core';
+
+/**
+ * A workspace file's path as a POSIX, repo-relative path, or null when it is not
+ * under `root`. Normalizes separators BEFORE stripping the root, so it is correct
+ * on Windows — a Uri's fsPath there uses backslashes, and the naive
+ * `fsPath.startsWith(root + '/')` never matches, silently returning an absolute
+ * path that every path-keyed lookup then misses. Pure, so the keying is tested.
+ */
+export function relPath(root: string, fsPath: string): string | null {
+	const toPosix = (p: string) => p.split('\\').join('/');
+	const f = toPosix(fsPath);
+	const r = toPosix(root);
+	if (f === r) return '';
+	return f.startsWith(r + '/') ? f.slice(r.length + 1) : null;
+}
 
 export type Leader =
 	| { kind: 'line'; open: string }
@@ -98,10 +114,8 @@ export function claimScaffoldTriggerLength(before: string): number {
 	return m ? m[0].length : 0;
 }
 
-const REGION_NAME = /^[a-z0-9][a-z0-9-]*$/;
-
 export function isValidRegionName(name: string): boolean {
-	return REGION_NAME.test(name);
+	return isKebabName(name);
 }
 
 export function suggestRegionName(selection: string, taken: Set<string>): string {
@@ -111,7 +125,7 @@ export function suggestRegionName(selection: string, taken: Set<string>): string
 		.filter((w) => w !== '' && !/^[0-9]+$/.test(w))
 		.slice(0, 3);
 	let base = words.join('-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
-	if (!REGION_NAME.test(base)) base = 'region';
+	if (!isKebabName(base)) base = 'region';
 	if (!taken.has(base)) return base;
 	for (let n = 2; ; n++) {
 		const candidate = `${base}-${n}`;
@@ -531,9 +545,12 @@ export function refCompletionContext(line: string, character: number): RefComple
 	// a reference cannot contain a space; commas separate a claim's sources, so
 	// the active reference is the segment after the last comma
 	const seg = value.split(',').pop() ?? '';
+	// shares core's kebab grammar, but stays non-throwing: a leading-`:` or a
+	// non-kebab prefix means "no alias yet" (parseRef would treat leading-`:` as
+	// an empty alias and throw — completion must not)
 	const splitAlias = (s: string): { alias?: string; rest: string } => {
 		const c = s.indexOf(':');
-		return c > 0 && /^[a-z0-9][a-z0-9-]*$/.test(s.slice(0, c))
+		return c > 0 && isKebabName(s.slice(0, c))
 			? { alias: s.slice(0, c), rest: s.slice(c + 1) }
 			: { rest: s };
 	};
