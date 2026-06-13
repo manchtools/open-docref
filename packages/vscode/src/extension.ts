@@ -40,6 +40,7 @@ import {
 	normalizeSelectionLines,
 	symbolFragmentForSelection,
 	diagnosticsFromReport,
+	quickFixesForState,
 	buildReferencesTree,
 	buildAnchorsTree,
 	buildStageTree,
@@ -205,6 +206,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		grammarsDir: join(context.extensionPath, 'dist', 'wasm')
 	});
 
+	// `${doc}:${line}` -> the ref and state under each docref squiggle, so the
+	// code-action provider can offer jump-to-code / diff without re-deriving from
+	// the report. Rebuilt on every rescan, in lockstep with the diagnostics.
+	let actionableAt = new Map<string, { ref?: string; code: string }>();
+
 	// virtual documents backing the approved-vs-current drift diffs
 	const driftDocs = new Map<string, string>();
 	let driftSeq = 0;
@@ -213,13 +219,18 @@ export function activate(context: vscode.ExtensionContext): void {
 	};
 
 	/**
-	 * Open one diff tab per stale claim whose approved content is
-	 * recoverable from git history. Returns how many opened.
+	 * Open one diff tab per stale claim whose approved content is recoverable
+	 * from git history. Scope it to a markdown doc, a single ref, or neither
+	 * (the whole project). Returns how many opened.
 	 */
-	async function openDrift(rel?: string): Promise<{ opened: number; total: number }> {
+	async function openDrift(opts?: {
+		doc?: string;
+		ref?: string;
+	}): Promise<{ opened: number; total: number }> {
 		const p = project();
 		if (!p) return { opened: 0, total: 0 };
-		const { entries } = await diff(p, rel ? [rel] : undefined);
+		const all = (await diff(p, opts?.doc ? [opts.doc] : undefined)).entries;
+		const entries = opts?.ref ? all.filter((e) => e.ref === opts.ref) : all;
 		let opened = 0;
 		for (const e of entries) {
 			if (e.approvedContent === undefined || e.currentContent === undefined) continue;
@@ -313,7 +324,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 		diagnostics.clear();
+		actionableAt = new Map();
 		for (const [doc, list] of diagnosticsFromReport(report)) {
+			for (const d of list) actionableAt.set(`${doc}:${d.line}`, { ref: d.ref, code: d.code });
 			diagnostics.set(
 				vscode.Uri.file(`${p.root}/${doc}`),
 				list.map((d) => {
@@ -411,6 +424,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const indent = /^[\t ]*/.exec(doc.lineAt(startLine - 1).text)![0];
 		const m = markerLines(name, leader, indent);
+		// Both markers MUST go in one edit: a begin without its end is a transient
+		// unmatched-begin/nested-claim that an autosave-driven check would flag on
+		// disk before the user finishes. Keep the pair atomic — never split this.
 		await editor.edit((edit) => {
 			edit.insert(new vscode.Position(startLine - 1, 0), m.begin + '\n');
 			edit.insert(new vscode.Position(endLine, 0), m.end + '\n');
@@ -523,6 +539,48 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	// Quick fixes on a docref squiggle: jump to the code it points at, diff the
+	// approved claim against the current source, approve it, or refresh a stale
+	// snippet. Which are offered is decided by quickFixesForState (unit-tested);
+	// this only turns each into a command-backed CodeAction, looking up the ref
+	// under the diagnostic from the lookup built during the last rescan.
+	const QUICK_FIX = vscode.CodeActionKind.QuickFix;
+	const codeActionProvider: vscode.CodeActionProvider = {
+		provideCodeActions(doc, _range, ctx) {
+			const root = workspaceRoot();
+			if (!root) return;
+			const rel = relPath(doc.uri, root).split('\\').join('/');
+			const actions: vscode.CodeAction[] = [];
+			const make = (
+				title: string,
+				command: string,
+				args: unknown[],
+				diag: vscode.Diagnostic,
+				preferred = false
+			): void => {
+				const a = new vscode.CodeAction(title, QUICK_FIX);
+				a.command = { command, title, arguments: args };
+				a.diagnostics = [diag];
+				a.isPreferred = preferred;
+				actions.push(a);
+			};
+			for (const diag of ctx.diagnostics) {
+				if (diag.source !== 'docref') continue;
+				const info = actionableAt.get(`${rel}:${diag.range.start.line + 1}`);
+				const fixes = quickFixesForState(String(diag.code));
+				if (info?.ref && fixes.openCode) {
+					make('docref: Open referenced code', 'docref.openAnchor', [info.ref], diag, true);
+				}
+				if (info?.ref && fixes.showDiff) {
+					make('docref: Show drift diff (approved vs current)', 'docref.showDriftForRef', [info.ref], diag);
+				}
+				if (fixes.approve) make('docref: Approve claims in this document', 'docref.approveClaims', [], diag);
+				if (fixes.refresh) make('docref: Refresh stale snippets', 'docref.refreshSnippets', [], diag);
+			}
+			return actions;
+		}
+	};
+
 	context.subscriptions.push(
 		diagnostics,
 		status,
@@ -570,6 +628,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			await rescan();
 		}),
 		vscode.languages.registerCodeLensProvider({ scheme: 'file' }, lensProvider),
+		vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, codeActionProvider, {
+			providedCodeActionKinds: [QUICK_FIX]
+		}),
 		vscode.languages.registerCompletionItemProvider(
 			{ language: 'markdown' },
 			completionProvider,
@@ -598,7 +659,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const editor = vscode.window.activeTextEditor;
 			const root = workspaceRoot();
 			const rel = editor && root ? relPath(editor.document.uri, root).split('\\').join('/') : undefined;
-			const { opened, total } = await openDrift(rel?.endsWith('.md') ? rel : undefined);
+			const { opened, total } = await openDrift(rel?.endsWith('.md') ? { doc: rel } : undefined);
 			if (opened === 0) {
 				void vscode.window.showInformationMessage(
 					total === 0
@@ -614,7 +675,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!p || !editor || !root) return;
 			const rel = relPath(editor.document.uri, root).split('\\').join('/');
 			// show the evidence first: one diff tab per recoverable claim
-			const { opened } = await openDrift(rel);
+			const { opened } = await openDrift({ doc: rel });
 			const confirmed = await vscode.window.showWarningMessage(
 				`Approve all claims in ${rel}? Only do this after reading the claimed prose against the current code.` +
 					(opened > 0 ? ` ${opened} drift diff(s) are open in the editor.` : ''),
@@ -629,9 +690,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			);
 			await rescan();
 		}),
-		vscode.commands.registerCommand('docref.openAnchor', async (refRaw: string) => {
+		// Accepts a raw ref string (tree click, code action) or a sidebar node
+		// (right-click menu), so one command serves every entry point.
+		vscode.commands.registerCommand('docref.openAnchor', async (arg: string | SidebarNode) => {
 			const root = workspaceRoot();
-			if (!root) return;
+			const refRaw = typeof arg === 'string' ? arg : arg?.ref;
+			if (!root || !refRaw) return;
 			try {
 				const ref = parseRef(refRaw);
 				if (ref.alias) {
@@ -648,6 +712,19 @@ export function activate(context: vscode.ExtensionContext): void {
 				);
 			} catch (e) {
 				void vscode.window.showWarningMessage(`docref: ${(e as Error).message}`);
+			}
+		}),
+		// The approved-vs-current diff for ONE claim (from the squiggle quick fix
+		// or a sidebar right-click), as opposed to docref.showDrift's whole-file
+		// sweep. Accepts a ref string or a sidebar node.
+		vscode.commands.registerCommand('docref.showDriftForRef', async (arg: string | SidebarNode) => {
+			const ref = typeof arg === 'string' ? arg : arg?.ref;
+			if (!ref) return;
+			const { opened } = await openDrift({ ref });
+			if (opened === 0) {
+				void vscode.window.showInformationMessage(
+					`docref: no approved-vs-current diff for ${ref} — it is not a drifted claim with a recoverable approved state.`
+				);
 			}
 		}),
 		vscode.commands.registerCommand('docref.openLocation', async (doc: string, line: number) => {

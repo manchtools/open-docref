@@ -16,11 +16,12 @@ export type LanguageId =
 	| 'swift'
 	| 'kotlin'
 	| 'scala'
-	| 'bash';
+	| 'bash'
+	| 'proto';
 
 export type LanguageInfo = { id: LanguageId; wasm: string };
 
-const BY_EXT: Record<string, LanguageInfo> = {
+export const BY_EXT: Record<string, LanguageInfo> = {
 	ts: { id: 'typescript', wasm: 'typescript' },
 	mts: { id: 'typescript', wasm: 'typescript' },
 	cts: { id: 'typescript', wasm: 'typescript' },
@@ -51,7 +52,8 @@ const BY_EXT: Record<string, LanguageInfo> = {
 	scala: { id: 'scala', wasm: 'scala' },
 	sc: { id: 'scala', wasm: 'scala' },
 	sh: { id: 'bash', wasm: 'bash' },
-	bash: { id: 'bash', wasm: 'bash' }
+	bash: { id: 'bash', wasm: 'bash' },
+	proto: { id: 'proto', wasm: 'proto' }
 };
 
 export function languageForFile(path: string): LanguageInfo | null {

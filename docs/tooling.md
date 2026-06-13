@@ -146,14 +146,16 @@ of scope.
 
 ### `docref suggest [--json]`
 
-<!-- docref: begin src=packages/core/src/ops.ts#suggest:e8a9644b -->
+<!-- docref: begin src=packages/core/src/ops.ts#suggest:83e6a8a0 -->
 
 The coverage gap-finder, the inverse of drift: `check` tells you when an
 existing anchor goes stale; `suggest` surfaces prose that *should* be a claim
 and isn't. It indexes every symbol and region marker in the `[anchors]` file
-set, then scans each document's prose — outside fenced code and outside
-existing references — for an inline-code identifier that resolves to exactly
-one anchor. Each hit is a candidate unanchored claim: the document, the line,
+set — each symbol by both its bare name and its qualified `Container.member`
+path, so wire-contract prose like `Message.field` matches where the bare leaf
+would be ambiguous — then scans each document's prose, outside fenced code and
+outside existing references, for an inline-code identifier that resolves to
+exactly one anchor. Each hit is a candidate unanchored claim: the document, the line,
 the identifier, and the ref it would carry. Heuristic and informational (always
 exit `0`); the reader decides whether the prose is really a claim worth pinning.
 
@@ -215,9 +217,12 @@ so the editor and CI can never disagree about what counts as stale.
   "Referenced by N docs". Editing anchored code is the moment the
   author still has context; the lens puts the doc debt in view exactly
   then. Click peeks the referencing locations.
-<!-- docref: begin src=packages/vscode/src/logic.ts#diagnosticsFromReport:4803db10 -->
+<!-- docref: begin src=packages/vscode/src/logic.ts#diagnosticsFromReport:21282af4,packages/vscode/src/logic.ts#quickFixesForState:247f87a2 -->
 - **Markdown diagnostics:** stale and broken references get squiggles
-  with the state and both hashes.
+  with the state and both hashes. A quick fix on the squiggle jumps to
+  the referenced code, opens the approved-vs-current drift diff for that
+  one claim, or approves it — so you can compare and contrast without
+  leaving the diagnostic.
 <!-- docref: end -->
 <!-- docref: begin src=packages/core/src/ops.ts#diff:07e65e40 -->
 - **Drift diffs:** *Show Claim Drift* opens one diff tab per stale

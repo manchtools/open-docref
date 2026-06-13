@@ -34,6 +34,9 @@ const LINE_LEADERS: Record<string, string> = {
 	makefile: '#',
 	dockerfile: '#',
 	elixir: '#',
+	proto: '//',
+	proto3: '//',
+	protobuf: '//',
 	sql: '--',
 	lua: '--',
 	haskell: '--'
@@ -124,6 +127,9 @@ export type DiagnosticData = {
 	severity: 'error' | 'warning';
 	message: string;
 	code: string;
+	/** The ref the squiggle sits on, so the editor can jump to the code or
+	 * diff it. Absent for scan errors, which are about the document itself. */
+	ref?: string;
 };
 
 export function diagnosticsFromReport(report: Report): Map<string, DiagnosticData[]> {
@@ -140,7 +146,8 @@ export function diagnosticsFromReport(report: Report): Map<string, DiagnosticDat
 			line: e.line,
 			severity: e.state === 'broken' ? 'error' : 'warning',
 			message: `${e.state}: ${e.ref}${hashes}${e.reason ? ` ${e.reason}` : ''}`,
-			code: e.state
+			code: e.state,
+			ref: e.ref
 		});
 	}
 	for (const e of report.errors) {
@@ -151,10 +158,39 @@ export function diagnosticsFromReport(report: Report): Map<string, DiagnosticDat
 			line: u.line,
 			severity: 'warning',
 			message: `unused-anchor: nothing references ${u.file}#@${u.name}`,
-			code: 'unused-anchor'
+			code: 'unused-anchor',
+			ref: `${u.file}#@${u.name}`
 		});
 	}
 	return byDoc;
+}
+
+export type QuickFixes = {
+	openCode: boolean; // jump to the referenced source declaration/region
+	showDiff: boolean; // open the approved-vs-current drift diff for the claim
+	approve: boolean; // re-approve the claim against the current code
+	refresh: boolean; // rewrite the materialized snippet from the current source
+};
+
+const NO_FIXES: QuickFixes = { openCode: false, showDiff: false, approve: false, refresh: false };
+
+/**
+ * Which editor quick fixes a docref diagnostic offers, by its state code.
+ * Only actions that can actually succeed for that state are offered: a stale
+ * claim can be inspected (jump to code), compared (drift diff) and approved; a
+ * stale snippet jumps to code and is rewritten by refresh (it is materialized,
+ * never approved); a broken ref has no code to open, and unused anchors and
+ * scan errors are not about a resolvable ref.
+ */
+export function quickFixesForState(code: string): QuickFixes {
+	switch (code) {
+		case 'stale-claim':
+			return { openCode: true, showDiff: true, approve: true, refresh: false };
+		case 'stale-snippet':
+			return { openCode: true, showDiff: false, approve: false, refresh: true };
+		default:
+			return { ...NO_FIXES };
+	}
 }
 
 /**
@@ -230,8 +266,10 @@ export function buildReferencesTree(index: RefIndex, report: Report | null): Sid
 				label: e.ref,
 				description: `${e.state}  ${e.doc}:${e.line}`,
 				severity: e.state === 'broken' ? 'error' : 'warning',
+				state: e.state,
 				doc: e.doc,
-				line: e.line
+				line: e.line,
+				ref: e.ref
 			});
 		}
 		for (const u of report.unusedAnchors) {

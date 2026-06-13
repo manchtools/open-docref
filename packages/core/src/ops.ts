@@ -808,7 +808,7 @@ export type SuggestEntry = {
  * really a claim worth anchoring.
  */
 export async function suggest(project: Project): Promise<{ suggestions: SuggestEntry[] }> {
-	const symbols = new Map<string, string[]>(); // leaf name -> [file#path]
+	const symbols = new Map<string, string[]>(); // name (leaf or dotted path) -> [file#path]
 	const regions = new Map<string, string[]>(); // region name -> [file#@name]
 	const add = (m: Map<string, string[]>, key: string, ref: string) => {
 		const list = m.get(key) ?? [];
@@ -828,7 +828,14 @@ export async function suggest(project: Project): Promise<{ suggestions: SuggestE
 		if (!languageForFile(file)) continue;
 		try {
 			for (const d of await listDeclarations(text, file)) {
-				add(symbols, d.path[d.path.length - 1]!, `${file}#${d.path.join('.')}`);
+				const path = d.path.join('.');
+				const ref = `${file}#${path}`;
+				// Index by the bare leaf AND, for a member, the full dotted path, so
+				// prose that qualifies a member (`Message.field`, `Class.method`) — the
+				// form a wire contract is usually written in, and unambiguous where the
+				// bare leaf is shared across containers — matches just as `#path` would.
+				add(symbols, d.path[d.path.length - 1]!, ref);
+				if (d.path.length > 1) add(symbols, path, ref);
 			}
 		} catch {
 			// unsupported language or parse failure: regions still indexed

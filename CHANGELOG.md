@@ -34,6 +34,12 @@ under its own heading and noted in the relevant document under [docs/](docs/).
   interfaces, enums, and top-level constants; a local matched none of those but
   resolved anyway, which also made a same-named bare reference ambiguous.
   Nested functions remain addressable.
+- Ship every registered grammar in the packaged extension and the standalone
+  binary, not just the original five. Both grammar lists were hardcoded and had
+  fallen behind the language registry, so symbol resolution for the additional
+  languages silently failed once packaged (it worked only when run from source).
+  The extension copy step now derives its list from the registry, the binary
+  embeds all of them, and a self-discovering test fails if either falls behind.
 
 ### Added
 
@@ -42,6 +48,15 @@ under its own heading and noted in the relevant document under [docs/](docs/).
   Python — via a data-driven collector (a set of declaration node types per
   grammar), so a method in any of them anchors as `file#Class.method` with no
   region marker.
+- Symbol resolution for Protocol Buffers (`.proto`): `message`, `enum`,
+  `service`, `rpc`, message fields, and enum values anchor as
+  `file#Message.field` with no region marker. Unlike struct fields elsewhere, a
+  proto field number and an enum value number are the wire contract and the most
+  drift-prone part of a schema, so they are addressable; a bare field name that
+  several messages share is ambiguous and fails closed, the qualified form
+  resolves. Its tree-sitter grammar is built from source and vendored in the
+  package, since `tree-sitter-wasms` does not ship one;
+  `scripts/build-vendored-grammars.mjs` regenerates it.
 - `docref suggest`: a coverage gap-finder. It indexes every symbol and region
   in the `[anchors]` file set and flags prose (inline-code identifiers, outside
   fences and existing references) that resolves to exactly one anchor but isn't

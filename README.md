@@ -137,14 +137,22 @@ with access: authenticate the pull (or the install step) with
 
 The core library, the CLI, and a first cut of the VSCode extension are
 implemented and tested (milestones 1 through 5 of the plan): same-repo
-and cross-repo resolution, symbols (TypeScript, JavaScript, Go, Python,
-Rust, Java, C, C++, C#, Ruby, PHP, Swift, Kotlin, Scala, Bash)
-and regions, `check`, `refresh`, `approve`, `update`, `affected`, `suggest`,
-`ls`, `anchors`,
+and cross-repo resolution, symbols and regions, `check`, `refresh`,
+`approve`, `update`, `affected`, `suggest`, `ls`, `anchors`,
 and in the editor: create-anchor from a selection, reference autocomplete
 (path → symbol/region, with the hash attached), the references
 sidebar with live states, drift diagnostics, referenced-by CodeLens,
 and a status-bar counter.
+
+Structural (tree-sitter) symbol resolution covers:
+
+<!-- docref: begin src=packages/core/src/languages.ts#LanguageId:85e3e28e -->
+
+TypeScript, JavaScript, Go, Python, Rust, Java, C, C++, C#, Ruby, PHP, Swift,
+Kotlin, Scala, Bash, and Protocol Buffers. Any other file type still works with
+a region marker.
+
+<!-- docref: end -->
 
 Building from source and running the extension in a development host are
 covered in [CONTRIBUTING.md](CONTRIBUTING.md).

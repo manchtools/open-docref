@@ -57,10 +57,18 @@ function runtimeWasmPath(name: string): string {
 	return wasmConfig ? wasmConfig.runtimeWasm : packageResolve(`web-tree-sitter/${name}`);
 }
 
+// Grammars that tree-sitter-wasms does not ship are built from source (see
+// scripts/build-vendored-grammars.mjs) and vendored in this package's grammars/
+// dir, exposed via the package's "./grammars/*" export. They resolve through
+// node module resolution exactly like tree-sitter-wasms, so the same lookup
+// works from source, from a dependent's node_modules, and via self-reference.
+const VENDORED_GRAMMARS = new Set<string>(['proto']);
+
 function grammarWasmPath(wasm: string): string {
 	const file = `tree-sitter-${wasm}.wasm`;
 	if (wasmConfig?.grammar) return wasmConfig.grammar(wasm);
 	if (wasmConfig?.grammarsDir) return `${wasmConfig.grammarsDir}/${file}`;
+	if (VENDORED_GRAMMARS.has(wasm)) return packageResolve(`@open-docref/core/grammars/${file}`);
 	return packageResolve(`tree-sitter-wasms/out/${file}`);
 }
 
@@ -289,7 +297,14 @@ const NODE_TYPES: Record<GenericLanguage, string[]> = {
 	swift: ['function_declaration', 'class_declaration', 'protocol_declaration', 'property_declaration'],
 	kotlin: ['function_declaration', 'class_declaration', 'object_declaration', 'property_declaration'],
 	scala: ['function_definition', 'class_definition', 'object_definition', 'trait_definition', 'type_definition', 'val_definition'],
-	bash: ['function_definition']
+	bash: ['function_definition'],
+	// proto: message (type-like), enum, service (interface-like), rpc
+	// (method-like), plus message fields and enum values. Unlike struct fields
+	// elsewhere, a proto field/value number is the wire contract and the most
+	// drift-prone thing in a schema, so `Message.field` is addressable. `field`
+	// covers oneof members too (the grammar reuses it); `value` is the enum
+	// constant. Field options/defaults are other node types and are not swept in.
+	proto: ['message', 'enum', 'service', 'rpc', 'field', 'map_field', 'value']
 };
 
 const COLLECTORS: Record<LanguageId, (s: string, n: Node, st: string[], o: Decl[]) => void> = {
@@ -308,7 +323,8 @@ const COLLECTORS: Record<LanguageId, (s: string, n: Node, st: string[], o: Decl[
 	swift: namedCollector(new Set(NODE_TYPES.swift)),
 	kotlin: namedCollector(new Set(NODE_TYPES.kotlin)),
 	scala: namedCollector(new Set(NODE_TYPES.scala)),
-	bash: namedCollector(new Set(NODE_TYPES.bash))
+	bash: namedCollector(new Set(NODE_TYPES.bash)),
+	proto: namedCollector(new Set(NODE_TYPES.proto))
 };
 
 // Parsing a file is by far the dominant cost, and a document with many

@@ -706,4 +706,29 @@ describe('suggest: candidate unanchored claims', () => {
 			{ doc: 'docs/y.md', line: 3, identifier: 'tenant-scope', refs: ['src/q.sql#@tenant-scope'] }
 		]);
 	});
+
+	it('flags a qualified Message.field / Class.method mention, the form wire-contract prose uses', async () => {
+		// the suggester indexed only leaf names, so prose that qualified a member
+		// — `CreateRequest.shares`, the exact form a proto wire contract is written
+		// in — never matched, even though `#CreateRequest.shares` resolves. A bare
+		// `shares` would also be ambiguous across messages; the qualified path is
+		// the unambiguous, anchorable-as-written form.
+		const root = tmp();
+		write(root, 'docref.toml', '[anchors]\nallow-unused = true\n');
+		write(
+			root,
+			'api.proto',
+			'syntax = "proto3";\nmessage CreateRequest {\n  repeated string shares = 1;\n}\nmessage Share {\n  string shares = 1;\n}\n'
+		);
+		write(root, 'docs/wire.md', '# Wire\n\nEach `CreateRequest.shares` entry is a share id.\n');
+		const { suggestions } = await suggest(loadProject(root));
+		// `shares` is a leaf in two messages (ambiguous), so only the qualified
+		// path is anchorable — and it now surfaces
+		expect(suggestions).toContainEqual({
+			doc: 'docs/wire.md',
+			line: 3,
+			identifier: 'CreateRequest.shares',
+			refs: ['api.proto#CreateRequest.shares']
+		});
+	});
 });

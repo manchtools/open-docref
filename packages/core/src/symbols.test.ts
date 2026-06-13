@@ -209,6 +209,119 @@ describe('python symbols', () => {
 	});
 });
 
+// Contract: a proto "symbol" is a named declaration — message (type-like),
+// enum, service (interface-like), rpc (method-like), AND the fields of a
+// message and the values of an enum. Unlike struct fields in other languages,
+// a proto field number and an enum value number are the wire contract: a
+// renumbered field or a retyped value is a subtle, security-relevant break —
+// exactly the drift docref exists to anchor — so they are addressable. Nesting
+// uses ".", so a field is `Message.field` and an rpc is `Service.rpc`. A bare
+// name several messages share is ambiguous and fails closed; the qualified
+// form resolves.
+const PROTO = `syntax = "proto3";
+
+package example;
+
+message Account {
+  string id = 1;
+  Profile profile = 2;
+
+  message Profile {
+    string display_name = 1;
+  }
+}
+
+enum Status {
+  STATUS_UNKNOWN = 0;
+  STATUS_ACTIVE = 1;
+}
+
+service AccountService {
+  rpc GetAccount(GetAccountRequest) returns (Account);
+  rpc DeleteAccount(DeleteAccountRequest) returns (Empty);
+}
+
+message GetAccountRequest {
+  string id = 1;
+  bool include_deleted = 2 [deprecated = true];
+}
+`;
+
+describe('proto symbols', () => {
+	it('finds a top-level message, enum, and service', async () => {
+		expect((await findSymbol(PROTO, 'a.proto', 'Account')).content).toContain('message Account');
+		expect((await findSymbol(PROTO, 'a.proto', 'Status')).content).toContain('enum Status');
+		expect((await findSymbol(PROTO, 'a.proto', 'AccountService')).content).toContain(
+			'service AccountService'
+		);
+	});
+
+	it('nests a message inside its enclosing message', async () => {
+		const d = await findSymbol(PROTO, 'a.proto', 'Account.Profile');
+		expect(d.content).toContain('message Profile');
+		expect(d.content).toContain('string display_name = 1;');
+	});
+
+	it('nests an rpc under its service', async () => {
+		const d = await findSymbol(PROTO, 'a.proto', 'AccountService.GetAccount');
+		expect(d.content).toContain('rpc GetAccount');
+		expect(d.content).not.toContain('service');
+	});
+
+	it('suffix-matches a unique rpc by its bare name', async () => {
+		expect((await findSymbol(PROTO, 'a.proto', 'DeleteAccount')).content).toContain(
+			'rpc DeleteAccount'
+		);
+	});
+
+	it('resolves a message field through its message (the field number is wire contract)', async () => {
+		expect((await findSymbol(PROTO, 'a.proto', 'Account.id')).content).toContain('string id = 1');
+		expect((await findSymbol(PROTO, 'a.proto', 'Account.profile')).content).toContain(
+			'Profile profile = 2'
+		);
+		// a field of a nested message addresses through both
+		expect((await findSymbol(PROTO, 'a.proto', 'Account.Profile.display_name')).content).toContain(
+			'string display_name = 1'
+		);
+	});
+
+	it('makes a field name shared by two messages ambiguous, but resolves the qualified form', async () => {
+		// Account.id and GetAccountRequest.id both exist: a bare `id` must fail
+		// closed rather than silently pick one (the drift would be invisible)
+		expect(await code(() => findSymbol(PROTO, 'a.proto', 'id'))).toBe('symbol-ambiguous');
+		expect((await findSymbol(PROTO, 'a.proto', 'GetAccountRequest.id')).content).toContain(
+			'string id = 1'
+		);
+	});
+
+	it('resolves an enum value through its enum (the value number is wire contract too)', async () => {
+		expect((await findSymbol(PROTO, 'a.proto', 'Status.STATUS_ACTIVE')).content).toContain(
+			'STATUS_ACTIVE = 1'
+		);
+	});
+
+	it('does not collect field options or defaults as symbols', async () => {
+		// the field itself is a symbol...
+		const paths = (await listDeclarations(PROTO, 'a.proto')).map((d) => d.path.join('.'));
+		expect(paths).toContain('GetAccountRequest.include_deleted');
+		// ...but a field OPTION (`[deprecated = true]`) is metadata, not a declaration:
+		// the generic `value`/`field` node types must not sweep it in
+		expect(paths.some((p) => p.endsWith('deprecated'))).toBe(false);
+	});
+
+	it('rejects an unknown symbol', async () => {
+		expect(await code(() => findSymbol(PROTO, 'a.proto', 'Nope'))).toBe('symbol-not-found');
+	});
+
+	it('reports the message span with 1-based line numbers', async () => {
+		const decls = await listDeclarations(PROTO, 'a.proto');
+		const acct = decls.find((d) => d.path.join('.') === 'Account');
+		expect(acct?.startLine).toBe(5);
+		const profile = decls.find((d) => d.path.join('.') === 'Account.Profile');
+		expect(profile?.path).toEqual(['Account', 'Profile']);
+	});
+});
+
 // Contract (format.md section 1): a symbol is a "function, method, class,
 // type, interface, enum, or top-level constant". A local variable inside a
 // function body is none of those, so it must NOT be anchorable — otherwise
@@ -343,7 +456,8 @@ describe('symbol resolution across popular languages', () => {
 		{ name: 'kotlin', file: 'a.kt', src: 'fun greet(n: String): String {\n  return n\n}\n', symbol: 'greet', has: 'fun greet' },
 		{ name: 'scala', file: 'A.scala', src: 'object G {\n  def greet(n: Int): Int = n\n}\n', symbol: 'greet', has: 'greet' },
 		{ name: 'kotlin (class)', file: 'a.kt', src: 'class Greeter {\n  fun greet(n: String): String { return n }\n}\n', symbol: 'Greeter', has: 'class Greeter' },
-		{ name: 'bash', file: 'a.sh', src: 'greet() {\n  echo "$1"\n}\n', symbol: 'greet', has: 'greet' }
+		{ name: 'bash', file: 'a.sh', src: 'greet() {\n  echo "$1"\n}\n', symbol: 'greet', has: 'greet' },
+		{ name: 'proto', file: 'a.proto', src: 'syntax = "proto3";\nmessage Greeting {\n  string text = 1;\n}\n', symbol: 'Greeting', has: 'message Greeting' }
 	];
 	for (const l of LANGS) {
 		it(`resolves a declaration in ${l.name}`, async () => {

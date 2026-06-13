@@ -89,9 +89,29 @@
 			{
 				"command": "docref.removeEverywhere",
 				"title": "Delete Reference Everywhere"
+			},
+			{
+				"command": "docref.openAnchor",
+				"title": "Docref: Open Referenced Code",
+				"icon": "$(go-to-file)"
+			},
+			{
+				"command": "docref.showDriftForRef",
+				"title": "Docref: Show Drift Diff for This Claim",
+				"icon": "$(diff)"
 			}
 		],
 		"menus": {
+			"commandPalette": [
+				{
+					"command": "docref.openAnchor",
+					"when": "false"
+				},
+				{
+					"command": "docref.showDriftForRef",
+					"when": "false"
+				}
+			],
 			"editor/context": [
 				{
 					"command": "docref.createAnchor",
@@ -137,6 +157,16 @@
 				}
 			],
 			"view/item/context": [
+				{
+					"command": "docref.openAnchor",
+					"when": "viewItem == hasRef",
+					"group": "navigation@1"
+				},
+				{
+					"command": "docref.showDriftForRef",
+					"when": "viewItem == hasRef",
+					"group": "navigation@2"
+				},
 				{
 					"command": "docref.stageRef",
 					"when": "viewItem == hasRef",

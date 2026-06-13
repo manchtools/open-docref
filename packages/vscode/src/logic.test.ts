@@ -8,6 +8,7 @@ import {
 	normalizeSelectionLines,
 	symbolFragmentForSelection,
 	diagnosticsFromReport,
+	quickFixesForState,
 	buildReferencesTree,
 	buildAnchorsTree,
 	buildStageTree,
@@ -30,6 +31,9 @@ describe('commentLeaderFor', () => {
 		expect(commentLeaderFor('go')).toEqual({ kind: 'line', open: '//' });
 		expect(commentLeaderFor('python')).toEqual({ kind: 'line', open: '#' });
 		expect(commentLeaderFor('sql')).toEqual({ kind: 'line', open: '--' });
+		// proto uses C-style line comments; cover the common extension language ids
+		expect(commentLeaderFor('proto')).toEqual({ kind: 'line', open: '//' });
+		expect(commentLeaderFor('proto3')).toEqual({ kind: 'line', open: '//' });
 	});
 
 	it('knows block-comment families', () => {
@@ -184,6 +188,50 @@ describe('diagnosticsFromReport', () => {
 		expect(byDoc.get('docs/c.md')![0]).toMatchObject({ line: 4, severity: 'error' });
 		expect([...byDoc.values()].flat().some((d) => d.message.includes('up-to-date'))).toBe(false);
 	});
+
+	// The squiggle must know which ref it sits on so the editor can offer
+	// "jump to the code" and "show the drift diff" as quick fixes. A scan error
+	// (a malformed marker) is about the document itself, not a ref, so it has none.
+	it('carries the ref on entry and unused-anchor diagnostics, but not scan errors', () => {
+		const byDoc = diagnosticsFromReport({
+			...REPORT,
+			unusedAnchors: [{ file: 'src/x.ts', name: 'spare', line: 7 }]
+		});
+		expect(byDoc.get('docs/a.md')![0]!.ref).toBe('src/x.ts#@r'); // stale-claim
+		expect(byDoc.get('docs/b.md')![0]!.ref).toBe('src/gone.ts#x'); // broken
+		expect(byDoc.get('src/x.ts')![0]!.ref).toBe('src/x.ts#@spare'); // unused-anchor
+		expect(byDoc.get('docs/c.md')![0]!.ref).toBeUndefined(); // nested-claim scan error
+	});
+});
+
+describe('quickFixesForState', () => {
+	// The available editor quick fixes are decided here so the vscode layer
+	// stays a thin command-dispatcher. Each state offers only actions that can
+	// actually succeed for it.
+	it('offers jump-to-code, the approved-vs-current diff, and approve for a stale claim', () => {
+		expect(quickFixesForState('stale-claim')).toEqual({
+			openCode: true,
+			showDiff: true,
+			approve: true,
+			refresh: false
+		});
+	});
+
+	it('offers jump-to-code and refresh for a stale snippet (a snippet is auto-rewritten, not approved)', () => {
+		expect(quickFixesForState('stale-snippet')).toEqual({
+			openCode: true,
+			showDiff: false,
+			approve: false,
+			refresh: true
+		});
+	});
+
+	it('offers nothing for broken (the code is gone), unused anchors, or scan errors', () => {
+		const none = { openCode: false, showDiff: false, approve: false, refresh: false };
+		for (const code of ['broken', 'unused-anchor', 'nested-claim', 'unknown-code']) {
+			expect(quickFixesForState(code)).toEqual(none);
+		}
+	});
 });
 
 describe('buildReferencesTree', () => {
@@ -217,6 +265,18 @@ describe('buildReferencesTree', () => {
 			expect(n.doc).toBeTruthy();
 			expect(n.line).toBeGreaterThan(0);
 		}
+	});
+
+	it('carries the ref on a drifted/broken attention item so it can open the code', () => {
+		// the right-click menu and the diagnostic quick fix need the ref; a stale
+		// or broken entry used to expose only its doc location (the marker line),
+		// with no way back to the source it claims
+		const tree = buildReferencesTree(index, REPORT);
+		const attention = tree[0]!;
+		const claim = attention.children!.find((n) => n.label === 'src/x.ts#@r')!;
+		expect(claim.ref).toBe('src/x.ts#@r');
+		const broken = attention.children!.find((n) => n.label === 'src/gone.ts#x')!;
+		expect(broken.ref).toBe('src/gone.ts#x');
 	});
 
 	it('omits the attention group entirely when everything is clean', () => {
