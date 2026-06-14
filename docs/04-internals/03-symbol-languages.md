@@ -31,9 +31,9 @@ export type LanguageId =
 
 That list is *which* files resolve; the map below is *what* each grammar
 exposes as a declaration. TypeScript, JavaScript, TSX, Go and Python use bespoke
-collectors; every other language is data-driven — `namedCollector(types, scope)`,
-where `types` is its declaration node types and `scope` (`functionLike` /
-`valueBindings`) marks which nodes open a function body and which are value
+collectors; every other language is data-driven via `namedCollector(types,
+scope)`, where `types` is its declaration node types and `scope` (`functionLike`
+/ `valueBindings`) marks which nodes open a function body and which are value
 bindings. So a `const`/`val`/`property` inside a function body is treated as a
 local and never collected, exactly as the TypeScript collector does. Fields and
 properties are addressable too: a class field, a struct field, or an

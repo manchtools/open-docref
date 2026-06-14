@@ -29,7 +29,7 @@ The gate **level** relaxes this for incremental adoption. Set it with
 
 - **strict** (default): drift and broken both fail, as above.
 - **lenient**: a `broken` reference or configuration error still fails (exit
-  `2`) — that is a real wiring error — but drift (`stale-snippet`,
+  `2`), since that is a real wiring error, but drift (`stale-snippet`,
   `stale-claim`, unused anchors) does not gate (exit `0`). Add references now
   and approve them over time.
 - **advisory**: report only; nothing fails (always exit `0`).
