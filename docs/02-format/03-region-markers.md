@@ -28,6 +28,9 @@ parsing:
 ```html
 <!-- docref: begin nav-skeleton -->
 ```
+```css
+/* docref: begin button-base */
+```
 
 Rules:
 
@@ -47,3 +50,10 @@ Rules:
 Symbols need no marker and are the default. Markers are for sub-symbol
 slices (five specific lines inside a function) or for languages and
 file types where structural resolution is unavailable.
+
+**CSS is the common case for the second kind.** A selector is not a unique,
+addressable name (the same `.btn` recurs, and `.`/`#`/`:` collide with the
+reference grammar), so CSS has no symbols: anchor a *block* of rules with a
+region marker and reference it as `styles.css#@button-base`. The same holds for
+HTML, templates, SQL, config, and plain text. A claim can then bind prose (or a
+screenshot) to that block; see [Claims](/format/claims).

@@ -176,6 +176,16 @@ WHERE tenant = $1
 ...
 <!-- docref: end nav-skeleton -->
 ```
+```css
+/* docref: begin button-base */
+...
+/* docref: end button-base */
+```
+
+**CSS, HTML, templates, SQL, config — anything with no addressable symbols —
+anchor with regions.** CSS especially: a selector is not a unique name (the same
+`.btn` recurs, and `.`/`#`/`:` collide with the ref grammar), so never try
+`styles.css#.btn`; wrap the rules in a region and reference `styles.css#@button-base`.
 
 Rules:
 
@@ -234,6 +244,24 @@ that spans two functions stays anchored to both. When any cited code changes the
 claim goes `stale-claim`, and a human/agent must **re-read the prose** and
 `docref approve` it. Editing the prose does not affect drift — only the cited
 code's hash does.
+
+**A claim's body need not be prose: pin a rendered artifact to its source.** A
+**screenshot** is rendered from code, and the usual failure is silent: the
+styling changes and the image no longer matches the UI. Wrap the screenshot in a
+claim citing the CSS that renders it (anchored with a region marker, since CSS
+has no symbols):
+
+```markdown
+<!-- docref: begin src=src/ui/button.css#@button-styles -->
+![The primary button](./img/button.png)
+<!-- docref: end -->
+```
+
+When the CSS changes the claim goes `stale-claim` the instant it drifts, the
+signal to **re-capture the screenshot and re-approve**, not whenever someone
+next happens to look at the picture. Do this for every screenshot whose
+appearance is controlled by code you can name; cite several sources when more
+than one input (CSS block, component, theme tokens) shapes the image.
 
 Generate these without hand-typing hashes:
 

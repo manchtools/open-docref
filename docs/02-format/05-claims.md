@@ -44,6 +44,30 @@ HTML comments carry claims deliberately: they are
 invisible on GitHub and in markdown previews, they survive Prettier,
 and renderers that strip comments lose nothing visible.
 
+## Pinning a screenshot to the CSS that renders it
+
+A claim's body is arbitrary markdown, so it can pin something other than prose.
+A **screenshot is an artifact rendered from code**, and the most common way it
+goes wrong is silently: someone changes the styling and the image in the docs no
+longer matches the UI. Wrap the screenshot in a claim that cites the CSS behind
+it, anchored with a [region marker](/format/region-markers), since CSS has no
+symbols:
+
+```markdown
+<!-- docref: begin src=src/ui/button.css#@button-styles -->
+![The primary button](./img/button.png)
+<!-- docref: end -->
+```
+
+When `button.css#@button-styles` changes, the claim goes *stale-claim* and
+`docref check` flags the page. That is the signal to **re-capture the screenshot
+and re-approve**. The drift is caught at the moment the styling changed, not
+whenever someone next happens to look at the picture. A visual asset earns a
+claim exactly as a sentence does. The same pattern fits any rendered output: a
+diagram built from a config, or a CLI screenshot tied to its command. Cite
+several sources (the CSS block, the component, the theme tokens) when more than
+one input controls what the image shows.
+
 ## Localized documentation
 
 A claim's `src=` ref and `:sha` describe the **code**, never the prose, so a
