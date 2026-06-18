@@ -42,9 +42,11 @@ still true and approves it.
 ## Anchors
 
 A reference names a piece of code: a **symbol** (a declaration, found by
-parsing — no marker needed) or a **region** (a span named in the source with
-`docref: begin <name>` / `docref: end <name>`, for sub-symbol slices). The code
-side has its own loud signal, not just the docs:
+parsing — no marker needed; functions, types, and also class/struct fields and
+interface properties as `Type.field`) or a **region** (a span named in the
+source with `docref: begin <name>` / `docref: end <name>`, for sub-symbol slices
+and languages without addressable symbols, such as CSS). The code side has its
+own loud signal, not just the docs:
 
 <!-- docref: begin src=packages/core/src/ops.ts#anchors:8d9d6ba5,packages/core/src/ops.ts#exitCode:d41a5364 -->
 `docref anchors` inventories every region marker and what references it, and a
@@ -96,8 +98,11 @@ distribution.
 
 ## Use in CI
 
-`docref check` is the gate: it exits `1` on stale references and `2` on broken
-ones, so a red job blocks merging drift.
+`docref check` is the gate: by default it exits `1` on stale references and `2`
+on broken ones, so a red job blocks merging drift. The level is configurable
+(`[check] level`, or a `--strict`/`--lenient`/`--advisory` flag): `lenient`
+fails only on broken references, so a repo can adopt docref before every
+reference is approved, and `advisory` reports without failing.
 
 ### Container image — nothing to install
 
