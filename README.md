@@ -107,21 +107,21 @@ reference is approved, and `advisory` reports without failing.
 ### Container image — nothing to install
 
 A purpose-built image (`ghcr.io/manchtools/open-docref`) carries the binary and
-git on a small Alpine base, so a job just runs `docref` against its checkout:
+git on a small Alpine base. Check out the repo and run `docref` against it with
+`docker run` (the image is musl with no Node, so it runs over the checkout, not
+as a `container:` job, where JS actions like checkout could not run inside it):
 
 ```yaml
 jobs:
   docs:
     runs-on: ubuntu-latest
-    container: ghcr.io/manchtools/open-docref:latest
     steps:
-      - uses: actions/checkout@v4
-      - run: docref check
+      - uses: actions/checkout@v5
+      - run: docker run --rm -v "$PWD:/repo" ghcr.io/manchtools/open-docref check
 ```
 
-Or run it anywhere with Docker —
-`docker run --rm -v "$PWD:/repo" ghcr.io/manchtools/open-docref check` — or copy
-just the binary into your own image:
+The same `docker run` works anywhere locally, or copy just the binary into your
+own image:
 `COPY --from=ghcr.io/manchtools/open-docref /usr/local/bin/docref /usr/local/bin/`.
 
 ### Install the binary
