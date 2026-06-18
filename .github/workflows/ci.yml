@@ -60,3 +60,22 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node packages/cli/dist/docref.js affected --since "$BASE_SHA"
+
+  # Full dogfood: gate this repo with the PUBLISHED container, exactly as a
+  # consumer would. The build job above checks the current source; this checks
+  # the shipped artifact. Run via `docker run`, not a `container:` job: the
+  # image is tiny Alpine/musl with no Node, so a JS action like checkout cannot
+  # run inside it — check out on the host, then mount the repo into the image,
+  # the invocation docker/Dockerfile documents. safe.directory because the
+  # checkout is owned by the runner user while the container runs as root.
+  container-dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docref check via the published container
+        run: |
+          docker run --rm --pull=always -v "$PWD:/repo" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0='*' \
+            ghcr.io/manchtools/open-docref:latest check
