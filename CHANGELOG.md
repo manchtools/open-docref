@@ -9,31 +9,9 @@ under its own heading and noted in the relevant document under [docs/](docs/).
 
 ## [Unreleased]
 
-### Added
+_Nothing yet — changes accumulate here for the next release._
 
-- Field-level symbols. A class field, a struct field, and an interface/protocol
-  property now anchor as `Type.field`, the same treatment proto message fields
-  already get — these are slow-moving API surface that documentation names
-  constantly (`User.email`, `Config.retryCount`). Covered for TypeScript/JS
-  (class fields and interface properties), Go and Rust (struct fields), Python
-  (class-level attributes only), and Swift/Kotlin/C# (properties; Kotlin class
-  properties became addressable). Function-body locals are still excluded, a
-  bare field name shared by two types still fails closed as ambiguous, and an
-  exact top-level name now wins over a member that merely shares its leaf, so a
-  top-level declaration is never stranded by a same-named field.
-- A `check` gate **level** for incremental adoption, set with `[check] level` in
-  `docref.toml` or a `--strict`/`--lenient`/`--advisory` flag. `strict` (default)
-  fails on drift and broken alike; `lenient` still fails on a broken reference or
-  error but lets drift through, so references can be added before they are all
-  approved; `advisory` reports only. The report lists every finding under any
-  level — only the exit code (and the editor's squiggle severity) relaxes.
-- `docref repo add <alias> <url> [--ref <branch>]`: declare a cross-repo alias
-  and pin it in one step instead of hand-editing `docref.toml` and then running
-  `update`. The `undeclared-alias` error now points at the command, and the VS
-  Code extension offers it as a quick fix on a broken cross-repo reference (plus
-  a *Docref: Add Repository* palette command).
-
-## [0.1.0] - 2026-06-13
+## [0.1.0] - 2026-06-18
 
 docref's first release: the format, the CLI (single binary + container image),
 and the VS Code extension. Same-repo and cross-repo resolution; symbols across
@@ -74,6 +52,26 @@ editor; and an agent-ready JSON contract.
 
 ### Added
 
+- Field-level symbols. A class field, a struct field, and an interface/protocol
+  property anchor as `Type.field`, the same treatment proto message fields get —
+  slow-moving API surface that documentation names constantly (`User.email`,
+  `Config.retryCount`). Covered for TypeScript/JS (class fields and interface
+  properties), Go and Rust (struct fields), Python (class-level attributes), and
+  Swift/Kotlin/C# (properties). Function-body locals stay excluded, a bare field
+  shared by two types fails closed as ambiguous, and an exact top-level name wins
+  over a member that merely shares its leaf, so a top-level declaration is never
+  stranded by a same-named field.
+- A `check` gate **level** for incremental adoption (`[check] level`, or a
+  `--strict`/`--lenient`/`--advisory` flag): `strict` (default) fails on drift
+  and broken; `lenient` fails only on a broken reference or error, letting drift
+  through so references can be added before they are all approved; `advisory`
+  reports only. The report lists every finding under any level; only the exit
+  code (and the editor's squiggle severity) relaxes.
+- `docref repo add <alias> <url> [--ref <branch>]`: declare a cross-repo alias
+  and pin it in one step instead of hand-editing `docref.toml` then running
+  `update`. The `undeclared-alias` error points at the command, and the VS Code
+  extension offers it as a quick fix on a broken cross-repo reference (plus a
+  *Docref: Add Repository* palette command).
 - An installable agent skill (`skills/docref/SKILL.md`): a portable, repo-
   agnostic guide that teaches an AI agent every part of docref and pushes it to
   anchor liberally and *natively while writing* — naming code in prose becomes a
